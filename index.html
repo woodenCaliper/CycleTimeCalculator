@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AMR サイクルタイム シミュレーター</title>
+<style>
+/* ===== Reset & Base ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+/* ===== Header ===== */
+#header { background: #16213e; padding: 8px 16px; display: flex; align-items: center; border-bottom: 1px solid #0f3460; flex-shrink: 0; }
+#header h1 { font-size: 16px; font-weight: 600; color: #e94560; }
+
+/* ===== Main Layout ===== */
+#main { display: flex; flex: 1; overflow: hidden; }
+
+/* ===== Left Pane ===== */
+#left-pane { width: 280px; min-width: 40px; background: #16213e; border-right: 1px solid #0f3460; display: flex; flex-direction: column; transition: width 0.3s ease; overflow-y: auto; overflow-x: hidden; flex-shrink: 0; }
+#left-pane.collapsed { width: 40px; }
+#left-pane.collapsed .section-label, #left-pane.collapsed .param-row, #left-pane.collapsed .section-title, #left-pane.collapsed .stats-detail, #left-pane.collapsed .speed-input-group { display: none; }
+#left-pane.collapsed .tool-btn span.tool-label { display: none; }
+#left-pane.collapsed .tool-btn { justify-content: center; padding: 8px 0; }
+#left-pane.collapsed .sim-btn span.btn-label { display: none; }
+#left-pane.collapsed .sim-btn { justify-content: center; min-width: 0; padding: 6px 0; }
+
+#toggle-pane { background: none; border: none; color: #e94560; cursor: pointer; font-size: 18px; padding: 6px 10px; width: 100%; text-align: right; flex-shrink: 0; }
+#toggle-pane:hover { background: rgba(233,69,96,0.1); }
+#left-pane.collapsed #toggle-pane { text-align: center; }
+
+.pane-section { padding: 8px 12px; border-bottom: 1px solid #0f3460; }
+#left-pane.collapsed .pane-section { padding: 4px 4px; }
+.section-title { font-size: 11px; font-weight: 700; color: #e94560; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; }
+
+/* ===== Tool Buttons ===== */
+.tool-btn { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: none; background: none; color: #c0c0c0; cursor: pointer; width: 100%; text-align: left; border-radius: 4px; font-size: 13px; white-space: nowrap; }
+.tool-btn:hover { background: rgba(233,69,96,0.15); color: #fff; }
+.tool-btn.active { background: rgba(233,69,96,0.3); color: #e94560; }
+.tool-icon { width: 24px; text-align: center; font-size: 14px; flex-shrink: 0; }
+
+/* ===== Param Rows ===== */
+.param-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.param-row label { font-size: 12px; color: #aaa; }
+.param-row input[type="number"] { width: 70px; background: #0f3460; border: 1px solid #1a4a8a; color: #fff; padding: 3px 6px; border-radius: 3px; font-size: 12px; text-align: right; }
+.param-row .unit { font-size: 11px; color: #888; margin-left: 4px; min-width: 30px; }
+
+/* ===== Simulation Controls ===== */
+.sim-controls { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.sim-btn { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0; cursor: pointer; border-radius: 4px; font-size: 13px; white-space: nowrap; }
+.sim-btn:hover { background: #0f3460; }
+.sim-btn.active-ff { background: #e94560; color: #fff; border-color: #e94560; }
+.speed-input-group { display: flex; align-items: center; gap: 2px; margin-top: 4px; }
+.speed-input-group label { font-size: 11px; color: #aaa; }
+.speed-input-group input { width: 45px; background: #0f3460; border: 1px solid #1a4a8a; color: #fff; padding: 2px 4px; border-radius: 3px; font-size: 12px; text-align: right; }
+.speed-display { font-size: 11px; color: #e94560; margin-top: 4px; font-weight: 600; }
+
+/* ===== Stats ===== */
+.stat-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
+.stat-row .stat-label { color: #aaa; }
+.stat-row .stat-value { color: #4fc3f7; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats-detail { margin-top: 6px; font-size: 11px; color: #888; max-height: 120px; overflow-y: auto; }
+.stats-detail .amr-stat { margin-bottom: 3px; padding: 2px 0; border-bottom: 1px solid #0f3460; }
+
+/* ===== Right Pane (Canvas) ===== */
+#right-pane { flex: 1; position: relative; background: #111; overflow: hidden; }
+#canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+/* ===== Canvas Overlay Stats ===== */
+#overlay-stats { position: absolute; bottom: 10px; right: 10px; background: rgba(22,33,62,0.9); border: 1px solid #0f3460; border-radius: 6px; padding: 8px 12px; font-size: 11px; min-width: 220px; pointer-events: none; }
+#overlay-stats .os-title { font-weight: 700; color: #e94560; margin-bottom: 4px; }
+#overlay-stats .os-row { display: flex; justify-content: space-between; margin-bottom: 2px; }
+#overlay-stats .os-label { color: #aaa; }
+#overlay-stats .os-value { color: #4fc3f7; font-weight: 600; }
+
+/* ===== Tooltip ===== */
+[data-tooltip] { position: relative; }
+#left-pane.collapsed [data-tooltip]:hover::after { content: attr(data-tooltip); position: absolute; left: 44px; top: 50%; transform: translateY(-50%); background: #16213e; border: 1px solid #0f3460; color: #e0e0e0; padding: 4px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; z-index: 100; pointer-events: none; }
+
+/* ===== Context Menu ===== */
+#context-menu { position: absolute; background: #16213e; border: 1px solid #0f3460; border-radius: 4px; padding: 4px 0; display: none; z-index: 200; min-width: 120px; }
+#context-menu .cm-item { padding: 6px 12px; font-size: 12px; cursor: pointer; color: #e0e0e0; }
+#context-menu .cm-item:hover { background: rgba(233,69,96,0.2); }
+
+/* ===== Scale Calibration Modal ===== */
+#scale-modal { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #16213e; border: 1px solid #e94560; border-radius: 8px; padding: 20px; z-index: 300; display: none; min-width: 280px; }
+#scale-modal h3 { color: #e94560; margin-bottom: 12px; font-size: 14px; }
+#scale-modal input { width: 100%; background: #0f3460; border: 1px solid #1a4a8a; color: #fff; padding: 6px; border-radius: 4px; margin-bottom: 12px; font-size: 14px; }
+#scale-modal .modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+#scale-modal .modal-btn { padding: 6px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+#scale-modal .modal-btn.primary { background: #e94560; color: #fff; }
+#scale-modal .modal-btn.secondary { background: #0f3460; color: #e0e0e0; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #1a1a2e; }
+::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>AMR サイクルタイム シミュレーター</h1>
+</div>
+
+<div id="main">
+  <!-- Left Pane -->
+  <div id="left-pane">
+    <button id="toggle-pane" title="パネルを折りたたむ">&laquo;</button>
+
+    <!-- Tools Section -->
+    <div class="pane-section">
+      <div class="section-title">ツール</div>
+      <button class="tool-btn active" data-tool="select" data-tooltip="選択/移動"><span class="tool-icon">✋</span><span class="tool-label">選択 / 移動</span></button>
+      <button class="tool-btn" data-tool="image" data-tooltip="画像読込"><span class="tool-icon">📷</span><span class="tool-label">画像読込</span></button>
+      <button class="tool-btn" data-tool="pickup" data-tooltip="Pickup"><span class="tool-icon" style="color:#22c55e">■</span><span class="tool-label">Pickup Station</span></button>
+      <button class="tool-btn" data-tool="dropoff" data-tooltip="DropOff"><span class="tool-icon" style="color:#ef4444">■</span><span class="tool-label">DropOff Station</span></button>
+      <button class="tool-btn" data-tool="home" data-tooltip="Home"><span class="tool-icon" style="color:#3b82f6">●</span><span class="tool-label">待機エリア</span></button>
+      <button class="tool-btn" data-tool="waypoint" data-tooltip="Waypoint"><span class="tool-icon" style="color:#9ca3af">●</span><span class="tool-label">Waypoint</span></button>
+      <button class="tool-btn" data-tool="path" data-tooltip="経路作成"><span class="tool-icon">/</span><span class="tool-label">経路作成</span></button>
+      <button class="tool-btn" data-tool="delete" data-tooltip="削除"><span class="tool-icon">🗑</span><span class="tool-label">削除</span></button>
+      <button class="tool-btn" data-tool="scale" data-tooltip="スケール設定"><span class="tool-icon">📏</span><span class="tool-label">スケール設定</span></button>
+    </div>
+
+    <!-- Parameters Section -->
+    <div class="pane-section">
+      <div class="section-title">パラメータ</div>
+      <div class="param-row"><label>速度</label><div><input type="number" id="param-speed" value="1.0" min="0.1" max="5" step="0.1"><span class="unit">m/s</span></div></div>
+      <div class="param-row"><label>ドッキング</label><div><input type="number" id="param-docking" value="30" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
+      <div class="param-row"><label>リリース</label><div><input type="number" id="param-release" value="20" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
+      <div class="param-row"><label>AMR台数</label><div><input type="number" id="param-amr-count" value="1" min="1" max="10" step="1"><span class="unit">台</span></div></div>
+      <div class="param-row"><label>スケール</label><div><input type="number" id="param-scale" value="0.1" min="0.001" max="10" step="0.001"><span class="unit">m/px</span></div></div>
+    </div>
+
+    <!-- Simulation Controls -->
+    <div class="pane-section">
+      <div class="section-title">シミュレーション</div>
+      <div class="sim-controls">
+        <button class="sim-btn" id="btn-play-pause" data-tooltip="再生/一時停止"><span class="tool-icon">▶</span><span class="btn-label">再生</span></button>
+        <button class="sim-btn" id="btn-fast-forward" data-tooltip="早送り"><span class="tool-icon">⏩</span><span class="btn-label">x3</span></button>
+        <button class="sim-btn" id="btn-reset" data-tooltip="リセット"><span class="tool-icon">⏹</span><span class="btn-label">Reset</span></button>
+      </div>
+      <div class="speed-input-group">
+        <label>倍速:</label>
+        <input type="number" id="ff-speed-input" value="3" min="2" max="100" step="1">
+      </div>
+      <div class="speed-display" id="speed-display">現在: x1</div>
+    </div>
+
+    <!-- Stats Section -->
+    <div class="pane-section">
+      <div class="section-title">統計</div>
+      <div class="stat-row"><span class="stat-label">経過時間</span><span class="stat-value" id="stat-time">00:00:00</span></div>
+      <div class="stat-row"><span class="stat-label">搬送完了</span><span class="stat-value" id="stat-deliveries">0 回</span></div>
+      <div class="stat-row"><span class="stat-label">平均CT</span><span class="stat-value" id="stat-avg-ct">-- 秒</span></div>
+      <div class="stat-row"><span class="stat-label">スループット</span><span class="stat-value" id="stat-throughput">-- 回/h</span></div>
+      <div class="stats-detail" id="stats-detail"></div>
+    </div>
+  </div>
+
+  <!-- Right Pane -->
+  <div id="right-pane">
+    <canvas id="canvas"></canvas>
+    <div id="overlay-stats" style="display:none;">
+      <div class="os-title">AMR 詳細</div>
+      <div id="overlay-amr-stats"></div>
+    </div>
+    <div id="context-menu">
+      <div class="cm-item" data-action="delete">削除</div>
+    </div>
+    <div id="scale-modal">
+      <h3>スケール設定</h3>
+      <p style="font-size:12px;color:#aaa;margin-bottom:8px;">2点間の実際の距離を入力してください</p>
+      <input type="number" id="scale-distance-input" placeholder="距離 (m)" min="0.1" step="0.1">
+      <div class="modal-btns">
+        <button class="modal-btn secondary" id="scale-cancel">キャンセル</button>
+        <button class="modal-btn primary" id="scale-ok">設定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="image-input" accept="image/*" style="display:none;">
+
+<script>
+// ============================================================
+// DATA LAYER - State Store
+// ============================================================
+const state = {
+  nodes: new Map(),
+  segments: new Map(),
+  adjacency: new Map(),
+  amrs: [],
+  config: {
+    scale: 0.1,
+    amrSpeed: 1.0,
+    dockingTime: 30,
+    releaseTime: 20,
+    amrCount: 1,
+    simSpeed: 1,
+    ffSpeed: 3
+  },
+  bgImage: null,
+  nodeCounter: 0,
+  segCounter: 0,
+  simTime: 0,
+  running: false,
+  paused: false,
+  totalDeliveries: 0,
+  cycleRecords: [],
+  segmentReservation: new Map()
+};
+
+// ============================================================
+// CORE - Graph Manager
+// ============================================================
+const graphManager = {
+  addNode(type, x, y, label) {
+    const id = 'n' + (++state.nodeCounter);
+    const node = { id, type, x, y, label: label || this._defaultLabel(type) };
+    state.nodes.set(id, node);
+    state.adjacency.set(id, new Set());
+    return node;
+  },
+  _defaultLabel(type) {
+    const counts = { pickup: 0, dropoff: 0, home: 0, waypoint: 0 };
+    for (const n of state.nodes.values()) { if (n.type === type) counts[type]++; }
+    const names = { pickup: 'Pickup', dropoff: 'DropOff', home: 'Home', waypoint: 'WP' };
+    return `${names[type]} ${String.fromCharCode(65 + counts[type])}`;
+  },
+  removeNode(id) {
+    const toRemove = [];
+    for (const [sid, seg] of state.segments) {
+      if (seg.from === id || seg.to === id) toRemove.push(sid);
+    }
+    toRemove.forEach(sid => this.removeSegment(sid));
+    state.adjacency.delete(id);
+    for (const adj of state.adjacency.values()) adj.delete(id);
+    state.nodes.delete(id);
+  },
+  addSegment(fromId, toId) {
+    if (fromId === toId) return null;
+    for (const seg of state.segments.values()) {
+      if ((seg.from === fromId && seg.to === toId) || (seg.from === toId && seg.to === fromId)) return null;
+    }
+    const id = 's' + (++state.segCounter);
+    const nf = state.nodes.get(fromId), nt = state.nodes.get(toId);
+    const dx = nt.x - nf.x, dy = nt.y - nf.y;
+    const pxDist = Math.sqrt(dx*dx + dy*dy);
+    const seg = { id, from: fromId, to: toId, distance: pxDist * state.config.scale };
+    state.segments.set(id, seg);
+    state.adjacency.get(fromId).add(toId);
+    state.adjacency.get(toId).add(fromId);
+    return seg;
+  },
+  removeSegment(id) {
+    const seg = state.segments.get(id);
+    if (!seg) return;
+    state.adjacency.get(seg.from)?.delete(seg.to);
+    state.adjacency.get(seg.to)?.delete(seg.from);
+    state.segments.delete(id);
+    state.segmentReservation.delete(id);
+  },
+  recalcDistances() {
+    for (const seg of state.segments.values()) {
+      const nf = state.nodes.get(seg.from), nt = state.nodes.get(seg.to);
+      const dx = nt.x - nf.x, dy = nt.y - nf.y;
+      seg.distance = Math.sqrt(dx*dx + dy*dy) * state.config.scale;
+    }
+  },
+  getSegmentBetween(a, b) {
+    for (const seg of state.segments.values()) {
+      if ((seg.from === a && seg.to === b) || (seg.from === b && seg.to === a)) return seg;
+    }
+    return null;
+  },
+  findNearNode(x, y, radius = 15) {
+    let best = null, bestD = radius;
+    for (const n of state.nodes.values()) {
+      const d = Math.hypot(n.x - x, n.y - y);
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+  },
+  findNearSegment(x, y, threshold = 8) {
+    let best = null, bestD = threshold;
+    for (const seg of state.segments.values()) {
+      const a = state.nodes.get(seg.from), b = state.nodes.get(seg.to);
+      const d = pointToSegmentDist(x, y, a.x, a.y, b.x, b.y);
+      if (d < bestD) { bestD = d; best = seg; }
+    }
+    return best;
+  }
+};
+
+function pointToSegmentDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const lenSq = dx*dx + dy*dy;
+  if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+  let t = ((px - ax)*dx + (py - ay)*dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t*dx), py - (ay + t*dy));
+}
+
+// ============================================================
+// CORE - Pathfinder (Dijkstra)
+// ============================================================
+const pathfinder = {
+  findPath(startId, targetIds) {
+    if (!startId || targetIds.length === 0) return null;
+    const targets = new Set(targetIds);
+    if (targets.has(startId)) return [startId];
+    const dist = new Map(), prev = new Map(), visited = new Set();
+    const pq = []; // [distance, nodeId]
+    dist.set(startId, 0);
+    pq.push([0, startId]);
+    while (pq.length > 0) {
+      pq.sort((a,b) => a[0] - b[0]);
+      const [d, u] = pq.shift();
+      if (visited.has(u)) continue;
+      visited.add(u);
+      if (targets.has(u)) {
+        const path = [];
+        let cur = u;
+        while (cur !== undefined) { path.unshift(cur); cur = prev.get(cur); }
+        return path;
+      }
+      const neighbors = state.adjacency.get(u);
+      if (!neighbors) continue;
+      for (const v of neighbors) {
+        if (visited.has(v)) continue;
+        const seg = graphManager.getSegmentBetween(u, v);
+        if (!seg) continue;
+        const nd = d + seg.distance;
+        if (!dist.has(v) || nd < dist.get(v)) {
+          dist.set(v, nd);
+          prev.set(v, u);
+          pq.push([nd, v]);
+        }
+      }
+    }
+    return null;
+  },
+  findNearestOfType(startId, type) {
+    const targets = [];
+    for (const n of state.nodes.values()) {
+      if (n.type === type) targets.push(n.id);
+    }
+    return this.findPath(startId, targets);
+  }
+};
+
+// ============================================================
+// CORE - Collision Manager
+// ============================================================
+const collisionManager = {
+  tryReserve(amrId, segId) {
+    const current = state.segmentReservation.get(segId);
+    if (!current || current === amrId) {
+      state.segmentReservation.set(segId, amrId);
+      return true;
+    }
+    return false;
+  },
+  release(amrId, segId) {
+    if (state.segmentReservation.get(segId) === amrId) {
+      state.segmentReservation.delete(segId);
+    }
+  },
+  releaseAll(amrId) {
+    for (const [sid, owner] of state.segmentReservation) {
+      if (owner === amrId) state.segmentReservation.delete(sid);
+    }
+  },
+  isOccupiedByOther(amrId, segId) {
+    const owner = state.segmentReservation.get(segId);
+    return owner && owner !== amrId;
+  }
+};
+
+// ============================================================
+// CORE - Simulation Engine
+// ============================================================
+const simEngine = {
+  init() {
+    state.amrs = [];
+    state.simTime = 0;
+    state.totalDeliveries = 0;
+    state.cycleRecords = [];
+    state.segmentReservation.clear();
+    const homes = [...state.nodes.values()].filter(n => n.type === 'home');
+    const count = state.config.amrCount;
+    for (let i = 0; i < count; i++) {
+      const home = homes[i % homes.length] || homes[0];
+      if (!home) continue;
+      state.amrs.push({
+        id: 'amr_' + (i+1),
+        label: 'AMR-' + (i+1),
+        state: 'idle',
+        currentSegment: null,
+        positionOnSegment: 0,
+        x: home ? home.x : 0,
+        y: home ? home.y : 0,
+        currentPath: null,
+        pathIndex: 0,
+        currentNodeId: home ? home.id : null,
+        targetNodeId: null,
+        hasCargo: false,
+        taskCount: 0,
+        totalCycleTime: 0,
+        currentCycleStart: 0,
+        waitTimer: 0,
+        waitingTime: 0,
+        totalWaitingTime: 0,
+        assignedPickup: null,
+        direction: 0,
+        blinkTimer: 0
+      });
+    }
+  },
+
+  update(dt) {
+    state.simTime += dt;
+    for (const amr of state.amrs) {
+      this._updateAMR(amr, dt);
+    }
+  },
+
+  _updateAMR(amr, dt) {
+    switch (amr.state) {
+      case 'idle': this._handleIdle(amr); break;
+      case 'moving_to_pickup': this._handleMoving(amr, dt, 'docking'); break;
+      case 'docking': this._handleStation(amr, dt, state.config.dockingTime, 'moving_to_dropoff'); break;
+      case 'moving_to_dropoff': this._handleMoving(amr, dt, 'releasing'); break;
+      case 'releasing': this._handleStation(amr, dt, state.config.releaseTime, 'returning_home'); break;
+      case 'returning_home': this._handleMoving(amr, dt, 'idle'); break;
+    }
+    amr.blinkTimer += dt;
+  },
+
+  _handleIdle(amr) {
+    const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
+    const assigned = new Set(state.amrs.filter(a => a.assignedPickup).map(a => a.assignedPickup));
+    let bestPath = null, bestDist = Infinity;
+    for (const p of pickups) {
+      if (assigned.has(p.id)) continue;
+      const path = pathfinder.findPath(amr.currentNodeId, [p.id]);
+      if (path) {
+        const dist = this._pathDistance(path);
+        if (dist < bestDist) { bestDist = dist; bestPath = path; amr.assignedPickup = p.id; }
+      }
+    }
+    if (bestPath) {
+      amr.state = 'moving_to_pickup';
+      amr.currentPath = bestPath;
+      amr.pathIndex = 1;
+      amr.currentCycleStart = state.simTime;
+      amr.waitingTime = 0;
+      this._startSegment(amr);
+    }
+  },
+
+  _handleMoving(amr, dt, nextState) {
+    if (!amr.currentPath || amr.pathIndex >= amr.currentPath.length) {
+      collisionManager.releaseAll(amr.id);
+      amr.currentSegment = null;
+      if (nextState === 'docking') {
+        amr.state = 'docking';
+        amr.waitTimer = 0;
+      } else if (nextState === 'releasing') {
+        amr.state = 'releasing';
+        amr.waitTimer = 0;
+      } else if (nextState === 'idle') {
+        amr.state = 'idle';
+        amr.currentPath = null;
+      }
+      return;
+    }
+    const targetId = amr.currentPath[amr.pathIndex];
+    const target = state.nodes.get(targetId);
+    if (!target) return;
+
+    // Check segment reservation
+    const seg = amr.currentSegment ? state.segments.get(amr.currentSegment) : null;
+    if (!seg) {
+      this._startSegment(amr);
+      return;
+    }
+
+    const speed = state.config.amrSpeed;
+    const moveDist = speed * dt; // meters
+    const movePx = moveDist / state.config.scale; // pixels
+
+    const dx = target.x - amr.x, dy = target.y - amr.y;
+    const distToTarget = Math.hypot(dx, dy);
+
+    if (distToTarget <= movePx) {
+      // Arrived at target node
+      amr.x = target.x;
+      amr.y = target.y;
+      amr.currentNodeId = targetId;
+      collisionManager.release(amr.id, amr.currentSegment);
+      amr.currentSegment = null;
+      amr.pathIndex++;
+
+      if (amr.pathIndex >= amr.currentPath.length) {
+        // Reached final destination
+        collisionManager.releaseAll(amr.id);
+        if (nextState === 'docking') {
+          amr.state = 'docking';
+          amr.waitTimer = 0;
+          amr.hasCargo = false;
+        } else if (nextState === 'releasing') {
+          amr.state = 'releasing';
+          amr.waitTimer = 0;
+        } else if (nextState === 'idle') {
+          amr.state = 'idle';
+          amr.currentPath = null;
+          amr.assignedPickup = null;
+        }
+      } else {
+        this._startSegment(amr);
+      }
+    } else {
+      // Move towards target
+      const ratio = movePx / distToTarget;
+      amr.x += dx * ratio;
+      amr.y += dy * ratio;
+      amr.direction = Math.atan2(dy, dx);
+    }
+  },
+
+  _startSegment(amr) {
+    if (amr.pathIndex >= amr.currentPath.length) return;
+    const fromId = amr.currentPath[amr.pathIndex - 1] || amr.currentNodeId;
+    const toId = amr.currentPath[amr.pathIndex];
+    const seg = graphManager.getSegmentBetween(fromId, toId);
+    if (!seg) { amr.pathIndex++; return; }
+
+    if (collisionManager.tryReserve(amr.id, seg.id)) {
+      amr.currentSegment = seg.id;
+      const target = state.nodes.get(toId);
+      if (target) amr.direction = Math.atan2(target.y - amr.y, target.x - amr.x);
+    } else {
+      // Waiting - can't reserve segment
+      amr.waitingTime += 0.05;
+      amr.totalWaitingTime += 0.05;
+    }
+  },
+
+  _handleStation(amr, dt, duration, nextState) {
+    amr.waitTimer += dt;
+    if (amr.waitTimer >= duration) {
+      if (nextState === 'moving_to_dropoff') {
+        amr.hasCargo = true;
+        const path = pathfinder.findNearestOfType(amr.currentNodeId, 'dropoff');
+        if (path) {
+          amr.state = 'moving_to_dropoff';
+          amr.currentPath = path;
+          amr.pathIndex = 1;
+          this._startSegment(amr);
+        } else {
+          amr.state = 'idle';
+          amr.assignedPickup = null;
+        }
+      } else if (nextState === 'returning_home') {
+        amr.hasCargo = false;
+        amr.taskCount++;
+        state.totalDeliveries++;
+        const cycleTime = state.simTime - amr.currentCycleStart;
+        amr.totalCycleTime += cycleTime;
+        state.cycleRecords.push({
+          amrId: amr.id,
+          cycleNumber: amr.taskCount,
+          totalCycleTime: cycleTime,
+          waitingTime: amr.waitingTime
+        });
+        amr.assignedPickup = null;
+        const path = pathfinder.findNearestOfType(amr.currentNodeId, 'home');
+        if (path) {
+          amr.state = 'returning_home';
+          amr.currentPath = path;
+          amr.pathIndex = 1;
+          this._startSegment(amr);
+        } else {
+          amr.state = 'idle';
+        }
+      }
+    }
+  },
+
+  _pathDistance(path) {
+    let d = 0;
+    for (let i = 0; i < path.length - 1; i++) {
+      const seg = graphManager.getSegmentBetween(path[i], path[i+1]);
+      if (seg) d += seg.distance;
+    }
+    return d;
+  }
+};
+
+// ============================================================
+// UI - Canvas Renderer
+// ============================================================
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const renderer = {
+  resize() {
+    const rect = document.getElementById('right-pane').getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+  },
+  render() {
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Background
+    if (state.bgImage) {
+      const img = state.bgImage;
+      const scale = Math.min(w / img.width, h / img.height);
+      const iw = img.width * scale, ih = img.height * scale;
+      const ox = (w - iw) / 2, oy = (h - ih) / 2;
+      ctx.drawImage(img, ox, oy, iw, ih);
+    } else {
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#333';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('📷 画像を読み込んでください', w/2, h/2);
+    }
+
+    // Segments
+    for (const seg of state.segments.values()) {
+      const a = state.nodes.get(seg.from), b = state.nodes.get(seg.to);
+      if (!a || !b) continue;
+      const isReserved = state.segmentReservation.has(seg.id);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = isReserved ? 'rgba(233,69,96,0.5)' : 'rgba(150,150,150,0.6)';
+      ctx.lineWidth = isReserved ? 3 : 2;
+      ctx.stroke();
+      // Distance label
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      ctx.fillStyle = '#aaa';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(seg.distance.toFixed(1) + 'm', mx, my - 6);
+    }
+
+    // Path creation preview
+    if (inputHandler.pathNodes.length > 0 && inputHandler.currentTool === 'path') {
+      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = '#e94560';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < inputHandler.pathNodes.length - 1; i++) {
+        const a = state.nodes.get(inputHandler.pathNodes[i]);
+        const b = state.nodes.get(inputHandler.pathNodes[i+1]);
+        if (a && b) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+      }
+      if (inputHandler.mouseX !== null) {
+        const last = state.nodes.get(inputHandler.pathNodes[inputHandler.pathNodes.length - 1]);
+        if (last) { ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(inputHandler.mouseX, inputHandler.mouseY); ctx.stroke(); }
+      }
+      ctx.setLineDash([]);
+    }
+
+    // Scale calibration preview
+    if (inputHandler.scalePoints.length === 1) {
+      const p = inputHandler.scalePoints[0];
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#e94560';
+      ctx.fill();
+      if (inputHandler.mouseX !== null) {
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(inputHandler.mouseX, inputHandler.mouseY);
+        ctx.strokeStyle = '#e94560';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const d = Math.hypot(inputHandler.mouseX - p.x, inputHandler.mouseY - p.y);
+        ctx.fillStyle = '#e94560';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${d.toFixed(0)} px`, (p.x + inputHandler.mouseX)/2, (p.y + inputHandler.mouseY)/2 - 10);
+      }
+    }
+
+    // Nodes
+    for (const n of state.nodes.values()) {
+      this._drawNode(n);
+    }
+
+    // AMRs
+    for (const amr of state.amrs) {
+      this._drawAMR(amr);
+    }
+  },
+
+  _drawNode(n) {
+    ctx.save();
+    switch (n.type) {
+      case 'pickup':
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(n.x - 10, n.y - 10, 20, 20);
+        ctx.strokeStyle = '#166534';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(n.x - 10, n.y - 10, 20, 20);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('P', n.x, n.y);
+        break;
+      case 'dropoff':
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(n.x - 10, n.y - 10, 20, 20);
+        ctx.strokeStyle = '#991b1b';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(n.x - 10, n.y - 10, 20, 20);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('D', n.x, n.y);
+        break;
+      case 'home':
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, 8, 0, Math.PI * 2);
+        ctx.fillStyle = '#3b82f6';
+        ctx.fill();
+        ctx.strokeStyle = '#1e40af';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('H', n.x, n.y);
+        break;
+      case 'waypoint':
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#9ca3af';
+        ctx.fill();
+        break;
+    }
+    // Label
+    if (n.type !== 'waypoint') {
+      ctx.fillStyle = '#ddd';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(n.label, n.x, n.y - 16);
+    }
+    ctx.restore();
+  },
+
+  _drawAMR(amr) {
+    const blink = amr.state === 'docking' || amr.state === 'releasing';
+    if (blink && Math.floor(amr.blinkTimer * 3) % 2 === 0) {
+      // Blinking off phase - draw dimmer
+      ctx.globalAlpha = 0.4;
+    }
+
+    // Cargo (drawn behind AMR)
+    if (amr.hasCargo) {
+      ctx.save();
+      ctx.translate(amr.x, amr.y);
+      ctx.rotate(amr.direction);
+      ctx.fillStyle = '#666';
+      ctx.fillRect(-18, -5, 8, 10);
+      ctx.restore();
+    }
+
+    // AMR body
+    ctx.save();
+    ctx.translate(amr.x, amr.y);
+    ctx.rotate(amr.direction);
+    ctx.beginPath();
+    ctx.arc(0, 0, 7, 0, Math.PI * 2);
+    ctx.fillStyle = '#f97316';
+    ctx.fill();
+    ctx.strokeStyle = '#c2410c';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // Direction arrow
+    ctx.beginPath();
+    ctx.moveTo(7, 0);
+    ctx.lineTo(11, -3);
+    ctx.lineTo(11, 3);
+    ctx.closePath();
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.globalAlpha = 1;
+
+    // Label
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(amr.label, amr.x, amr.y - 12);
+
+    // State indicator
+    let stateText = '';
+    switch (amr.state) {
+      case 'idle': stateText = '待機'; break;
+      case 'docking': stateText = 'Dock'; break;
+      case 'releasing': stateText = 'Release'; break;
+    }
+    if (stateText) {
+      ctx.fillStyle = '#4fc3f7';
+      ctx.font = '8px sans-serif';
+      ctx.fillText(stateText, amr.x, amr.y + 16);
+    }
+  }
+};
+
+// ============================================================
+// UI - Input Handler
+// ============================================================
+const inputHandler = {
+  currentTool: 'select',
+  pathNodes: [],
+  scalePoints: [],
+  draggingNode: null,
+  mouseX: null,
+  mouseY: null,
+
+  init() {
+    canvas.addEventListener('mousedown', e => this._onMouseDown(e));
+    canvas.addEventListener('mousemove', e => this._onMouseMove(e));
+    canvas.addEventListener('mouseup', e => this._onMouseUp(e));
+    canvas.addEventListener('dblclick', e => this._onDblClick(e));
+    canvas.addEventListener('contextmenu', e => this._onContextMenu(e));
+    document.addEventListener('click', () => {
+      document.getElementById('context-menu').style.display = 'none';
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && this.currentTool === 'path' && this.pathNodes.length > 0) {
+        this.pathNodes = [];
+        renderer.render();
+      }
+    });
+  },
+
+  _getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  },
+
+  _onMouseDown(e) {
+    if (e.button !== 0) return;
+    const pos = this._getPos(e);
+    const tool = this.currentTool;
+
+    if (tool === 'select') {
+      const node = graphManager.findNearNode(pos.x, pos.y);
+      if (node) { this.draggingNode = node; }
+    } else if (['pickup', 'dropoff', 'home', 'waypoint'].includes(tool)) {
+      graphManager.addNode(tool, pos.x, pos.y);
+      renderer.render();
+    } else if (tool === 'path') {
+      const node = graphManager.findNearNode(pos.x, pos.y);
+      if (node) {
+        if (this.pathNodes.length > 0) {
+          graphManager.addSegment(this.pathNodes[this.pathNodes.length - 1], node.id);
+        }
+        this.pathNodes.push(node.id);
+        renderer.render();
+      }
+    } else if (tool === 'delete') {
+      const node = graphManager.findNearNode(pos.x, pos.y);
+      if (node) { graphManager.removeNode(node.id); }
+      else {
+        const seg = graphManager.findNearSegment(pos.x, pos.y);
+        if (seg) graphManager.removeSegment(seg.id);
+      }
+      renderer.render();
+    } else if (tool === 'scale') {
+      this.scalePoints.push(pos);
+      if (this.scalePoints.length === 2) {
+        const p1 = this.scalePoints[0], p2 = this.scalePoints[1];
+        const pxDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        inputHandler._scalePixelDist = pxDist;
+        document.getElementById('scale-modal').style.display = 'block';
+        document.getElementById('scale-distance-input').value = '';
+        document.getElementById('scale-distance-input').focus();
+        this.scalePoints = [];
+        this.currentTool = 'select';
+        uiController.updateToolButtons();
+      }
+      renderer.render();
+    }
+  },
+
+  _onMouseMove(e) {
+    const pos = this._getPos(e);
+    this.mouseX = pos.x;
+    this.mouseY = pos.y;
+    if (this.draggingNode) {
+      this.draggingNode.x = pos.x;
+      this.draggingNode.y = pos.y;
+      graphManager.recalcDistances();
+      renderer.render();
+    }
+    if (this.currentTool === 'path' && this.pathNodes.length > 0) {
+      renderer.render();
+    }
+    if (this.currentTool === 'scale' && this.scalePoints.length === 1) {
+      renderer.render();
+    }
+  },
+
+  _onMouseUp(e) {
+    this.draggingNode = null;
+  },
+
+  _onDblClick(e) {
+    if (this.currentTool === 'path' && this.pathNodes.length > 0) {
+      this.pathNodes = [];
+      renderer.render();
+    }
+  },
+
+  _onContextMenu(e) {
+    e.preventDefault();
+    const pos = this._getPos(e);
+    const node = graphManager.findNearNode(pos.x, pos.y);
+    const seg = !node ? graphManager.findNearSegment(pos.x, pos.y) : null;
+    if (node || seg) {
+      const menu = document.getElementById('context-menu');
+      menu.style.display = 'block';
+      menu.style.left = e.clientX + 'px';
+      menu.style.top = e.clientY + 'px';
+      menu._target = node || seg;
+      menu._isNode = !!node;
+    }
+  },
+
+  _scalePixelDist: 0
+};
+
+// Context menu handler
+document.querySelector('#context-menu .cm-item[data-action="delete"]').addEventListener('click', () => {
+  const menu = document.getElementById('context-menu');
+  if (menu._isNode) graphManager.removeNode(menu._target.id);
+  else graphManager.removeSegment(menu._target.id);
+  menu.style.display = 'none';
+  renderer.render();
+});
+
+// Scale modal handlers
+document.getElementById('scale-ok').addEventListener('click', () => {
+  const dist = parseFloat(document.getElementById('scale-distance-input').value);
+  if (dist > 0 && inputHandler._scalePixelDist > 0) {
+    state.config.scale = dist / inputHandler._scalePixelDist;
+    document.getElementById('param-scale').value = state.config.scale.toFixed(4);
+    graphManager.recalcDistances();
+    renderer.render();
+  }
+  document.getElementById('scale-modal').style.display = 'none';
+});
+document.getElementById('scale-cancel').addEventListener('click', () => {
+  document.getElementById('scale-modal').style.display = 'none';
+});
+
+// ============================================================
+// UI - Controller
+// ============================================================
+const uiController = {
+  init() {
+    // Tool buttons
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tool = btn.dataset.tool;
+        if (tool === 'image') {
+          document.getElementById('image-input').click();
+          return;
+        }
+        inputHandler.currentTool = tool;
+        inputHandler.pathNodes = [];
+        inputHandler.scalePoints = [];
+        this.updateToolButtons();
+      });
+    });
+
+    // Image input
+    document.getElementById('image-input').addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const img = new Image();
+      img.onload = () => {
+        state.bgImage = img;
+        renderer.render();
+      };
+      img.src = URL.createObjectURL(file);
+    });
+
+    // Params
+    document.getElementById('param-speed').addEventListener('change', e => { state.config.amrSpeed = parseFloat(e.target.value) || 1.0; });
+    document.getElementById('param-docking').addEventListener('change', e => { state.config.dockingTime = parseFloat(e.target.value) || 30; });
+    document.getElementById('param-release').addEventListener('change', e => { state.config.releaseTime = parseFloat(e.target.value) || 20; });
+    document.getElementById('param-amr-count').addEventListener('change', e => { state.config.amrCount = parseInt(e.target.value) || 1; });
+    document.getElementById('param-scale').addEventListener('change', e => {
+      state.config.scale = parseFloat(e.target.value) || 0.1;
+      graphManager.recalcDistances();
+      renderer.render();
+    });
+    document.getElementById('ff-speed-input').addEventListener('change', e => {
+      state.config.ffSpeed = Math.max(2, Math.min(100, parseInt(e.target.value) || 3));
+      e.target.value = state.config.ffSpeed;
+      document.querySelector('#btn-fast-forward .btn-label').textContent = 'x' + state.config.ffSpeed;
+    });
+
+    // Sim controls
+    document.getElementById('btn-play-pause').addEventListener('click', () => this._togglePlayPause());
+    document.getElementById('btn-fast-forward').addEventListener('click', () => this._toggleFastForward());
+    document.getElementById('btn-reset').addEventListener('click', () => this._reset());
+
+    // Toggle pane
+    document.getElementById('toggle-pane').addEventListener('click', () => {
+      const pane = document.getElementById('left-pane');
+      pane.classList.toggle('collapsed');
+      document.getElementById('toggle-pane').innerHTML = pane.classList.contains('collapsed') ? '&raquo;' : '&laquo;';
+      setTimeout(() => renderer.resize(), 350);
+      setTimeout(() => renderer.render(), 360);
+    });
+
+    // Resize
+    window.addEventListener('resize', () => { renderer.resize(); renderer.render(); });
+  },
+
+  updateToolButtons() {
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tool === inputHandler.currentTool);
+    });
+  },
+
+  _togglePlayPause() {
+    const btn = document.getElementById('btn-play-pause');
+    if (!state.running) {
+      // Start or resume
+      if (state.amrs.length === 0) {
+        const homes = [...state.nodes.values()].filter(n => n.type === 'home');
+        const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
+        const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
+        if (homes.length === 0 || pickups.length === 0 || dropoffs.length === 0) {
+          alert('Home、Pickup、DropOff を少なくとも1つずつ配置してください');
+          return;
+        }
+        simEngine.init();
+      }
+      state.running = true;
+      state.paused = false;
+      state.config.simSpeed = state._lastSpeed || 1;
+      btn.querySelector('.tool-icon').textContent = '⏸';
+      btn.querySelector('.btn-label').textContent = '一時停止';
+      this._updateSpeedDisplay();
+      lastTimestamp = performance.now();
+      requestAnimationFrame(simLoop);
+    } else {
+      // Pause
+      state.running = false;
+      state.paused = true;
+      state._lastSpeed = state.config.simSpeed;
+      btn.querySelector('.tool-icon').textContent = '▶';
+      btn.querySelector('.btn-label').textContent = '再生';
+    }
+  },
+
+  _toggleFastForward() {
+    const ffBtn = document.getElementById('btn-fast-forward');
+    if (state.config.simSpeed > 1) {
+      // Currently fast forwarding -> return to x1
+      state.config.simSpeed = 1;
+      ffBtn.classList.remove('active-ff');
+    } else {
+      // Go to fast forward
+      state.config.simSpeed = state.config.ffSpeed;
+      ffBtn.classList.add('active-ff');
+      if (!state.running) {
+        // Also start if stopped
+        const homes = [...state.nodes.values()].filter(n => n.type === 'home');
+        const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
+        const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
+        if (homes.length === 0 || pickups.length === 0 || dropoffs.length === 0) {
+          alert('Home、Pickup、DropOff を少なくとも1つずつ配置してください');
+          return;
+        }
+        if (state.amrs.length === 0) simEngine.init();
+        state.running = true;
+        state.paused = false;
+        const playBtn = document.getElementById('btn-play-pause');
+        playBtn.querySelector('.tool-icon').textContent = '⏸';
+        playBtn.querySelector('.btn-label').textContent = '一時停止';
+        lastTimestamp = performance.now();
+        requestAnimationFrame(simLoop);
+      }
+    }
+    this._updateSpeedDisplay();
+  },
+
+  _reset() {
+    state.running = false;
+    state.paused = false;
+    state.simTime = 0;
+    state.totalDeliveries = 0;
+    state.cycleRecords = [];
+    state.amrs = [];
+    state.segmentReservation.clear();
+    state.config.simSpeed = 1;
+    state._lastSpeed = 1;
+    const playBtn = document.getElementById('btn-play-pause');
+    playBtn.querySelector('.tool-icon').textContent = '▶';
+    playBtn.querySelector('.btn-label').textContent = '再生';
+    document.getElementById('btn-fast-forward').classList.remove('active-ff');
+    this._updateSpeedDisplay();
+    this.updateStats();
+    renderer.render();
+  },
+
+  _updateSpeedDisplay() {
+    const disp = document.getElementById('speed-display');
+    disp.textContent = '現在: x' + state.config.simSpeed;
+    const ffBtn = document.getElementById('btn-fast-forward');
+    ffBtn.classList.toggle('active-ff', state.config.simSpeed > 1);
+  },
+
+  updateStats() {
+    const t = state.simTime;
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const s = Math.floor(t % 60);
+    document.getElementById('stat-time').textContent =
+      `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+
+    document.getElementById('stat-deliveries').textContent = state.totalDeliveries + ' 回';
+
+    if (state.totalDeliveries > 0) {
+      const totalCT = state.cycleRecords.reduce((s, r) => s + r.totalCycleTime, 0);
+      const avgCT = totalCT / state.totalDeliveries;
+      document.getElementById('stat-avg-ct').textContent = avgCT.toFixed(1) + ' 秒';
+      const tp = t > 0 ? (state.totalDeliveries / t) * 3600 : 0;
+      document.getElementById('stat-throughput').textContent = tp.toFixed(1) + ' 回/h';
+    } else {
+      document.getElementById('stat-avg-ct').textContent = '-- 秒';
+      document.getElementById('stat-throughput').textContent = '-- 回/h';
+    }
+
+    // AMR detail
+    const detail = document.getElementById('stats-detail');
+    const overlay = document.getElementById('overlay-amr-stats');
+    let detailHtml = '', overlayHtml = '';
+    if (state.amrs.length > 0) {
+      document.getElementById('overlay-stats').style.display = 'block';
+      for (const amr of state.amrs) {
+        const avgCT = amr.taskCount > 0 ? (amr.totalCycleTime / amr.taskCount).toFixed(1) : '--';
+        const waitPct = t > 0 ? ((amr.totalWaitingTime / t) * 100).toFixed(1) : '0.0';
+        const line = `${amr.label}: ${amr.taskCount}回, 平均${avgCT}s, 待機${waitPct}%`;
+        detailHtml += `<div class="amr-stat">${line}</div>`;
+        overlayHtml += `<div class="os-row"><span class="os-label">${amr.label}</span><span class="os-value">${amr.taskCount}回 / ${avgCT}s / 待${waitPct}%</span></div>`;
+      }
+    } else {
+      document.getElementById('overlay-stats').style.display = 'none';
+    }
+    detail.innerHTML = detailHtml;
+    overlay.innerHTML = overlayHtml;
+  }
+};
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+let lastTimestamp = 0;
+function simLoop(timestamp) {
+  if (!state.running) return;
+  const dtReal = Math.min((timestamp - lastTimestamp) / 1000, 0.1); // cap at 100ms
+  lastTimestamp = timestamp;
+  const dtSim = dtReal * state.config.simSpeed;
+  const fixedDt = 0.05;
+  let remaining = dtSim;
+  while (remaining > 0) {
+    const step = Math.min(remaining, fixedDt);
+    simEngine.update(step);
+    remaining -= step;
+  }
+  renderer.render();
+  uiController.updateStats();
+  requestAnimationFrame(simLoop);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+renderer.resize();
+renderer.render();
+inputHandler.init();
+uiController.init();
+</script>
+</body>
+</html>
