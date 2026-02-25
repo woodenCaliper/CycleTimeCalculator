@@ -66,6 +66,11 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 #right-pane { flex: 1; position: relative; background: #111; overflow: hidden; }
 #canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
 
+/* ===== Notification ===== */
+#notification { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(22,33,62,0.95); border: 1px solid #e94560; border-radius: 6px; padding: 6px 14px; font-size: 12px; color: #e94560; display: none; z-index: 150; pointer-events: none; max-width: 340px; text-align: center; }
+#notification.info { border-color: #4fc3f7; color: #4fc3f7; }
+#notification.success { border-color: #22c55e; color: #22c55e; }
+
 /* ===== Canvas Overlay Stats ===== */
 #overlay-stats { position: absolute; bottom: 10px; right: 10px; background: rgba(22,33,62,0.9); border: 1px solid #0f3460; border-radius: 6px; padding: 8px 12px; font-size: 11px; min-width: 220px; pointer-events: none; }
 #overlay-stats .os-title { font-weight: 700; color: #e94560; margin-bottom: 4px; }
@@ -117,7 +122,8 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <button class="tool-btn" data-tool="dropoff" data-tooltip="DropOff"><span class="tool-icon" style="color:#ef4444">■</span><span class="tool-label">DropOff Station</span></button>
       <button class="tool-btn" data-tool="home" data-tooltip="Home"><span class="tool-icon" style="color:#3b82f6">●</span><span class="tool-label">待機エリア</span></button>
       <button class="tool-btn" data-tool="waypoint" data-tooltip="Waypoint"><span class="tool-icon" style="color:#9ca3af">●</span><span class="tool-label">Waypoint</span></button>
-      <button class="tool-btn" data-tool="path" data-tooltip="経路作成"><span class="tool-icon">/</span><span class="tool-label">経路作成</span></button>
+      <button class="tool-btn" data-tool="loop-path" data-tooltip="ループ経路作成"><span class="tool-icon" style="color:#4ade80">/</span><span class="tool-label">ループ経路作成</span></button>
+      <button class="tool-btn" data-tool="home-branch" data-tooltip="Home枝接続"><span class="tool-icon" style="color:#60a5fa">⎇</span><span class="tool-label">Home枝接続</span></button>
       <button class="tool-btn" data-tool="delete" data-tooltip="削除"><span class="tool-icon">🗑</span><span class="tool-label">削除</span></button>
       <button class="tool-btn" data-tool="scale" data-tooltip="スケール設定"><span class="tool-icon">📏</span><span class="tool-label">スケール設定</span></button>
     </div>
@@ -161,6 +167,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
   <!-- Right Pane -->
   <div id="right-pane">
     <canvas id="canvas"></canvas>
+    <div id="notification"></div>
     <div id="overlay-stats" style="display:none;">
       <div class="os-title">AMR 詳細</div>
       <div id="overlay-amr-stats"></div>
@@ -190,6 +197,9 @@ const state = {
   nodes: new Map(),
   segments: new Map(),
   adjacency: new Map(),
+  loopSegments: new Set(),      // ループ部セグメントID集合
+  homeSegments: new Set(),      // Home枝セグメントID集合
+  loopOrder: [],                // ループ部ノードの順序配列
   amrs: [],
   config: {
     scale: 0.1,
@@ -212,87 +222,8 @@ const state = {
 };
 
 // ============================================================
-// CORE - Graph Manager
+// UTILITY
 // ============================================================
-const graphManager = {
-  addNode(type, x, y, label) {
-    const id = 'n' + (++state.nodeCounter);
-    const node = { id, type, x, y, label: label || this._defaultLabel(type) };
-    state.nodes.set(id, node);
-    state.adjacency.set(id, new Set());
-    return node;
-  },
-  _defaultLabel(type) {
-    const counts = { pickup: 0, dropoff: 0, home: 0, waypoint: 0 };
-    for (const n of state.nodes.values()) { if (n.type === type) counts[type]++; }
-    const names = { pickup: 'Pickup', dropoff: 'DropOff', home: 'Home', waypoint: 'WP' };
-    return `${names[type]} ${String.fromCharCode(65 + counts[type])}`;
-  },
-  removeNode(id) {
-    const toRemove = [];
-    for (const [sid, seg] of state.segments) {
-      if (seg.from === id || seg.to === id) toRemove.push(sid);
-    }
-    toRemove.forEach(sid => this.removeSegment(sid));
-    state.adjacency.delete(id);
-    for (const adj of state.adjacency.values()) adj.delete(id);
-    state.nodes.delete(id);
-  },
-  addSegment(fromId, toId) {
-    if (fromId === toId) return null;
-    for (const seg of state.segments.values()) {
-      if ((seg.from === fromId && seg.to === toId) || (seg.from === toId && seg.to === fromId)) return null;
-    }
-    const id = 's' + (++state.segCounter);
-    const nf = state.nodes.get(fromId), nt = state.nodes.get(toId);
-    const dx = nt.x - nf.x, dy = nt.y - nf.y;
-    const pxDist = Math.sqrt(dx*dx + dy*dy);
-    const seg = { id, from: fromId, to: toId, distance: pxDist * state.config.scale };
-    state.segments.set(id, seg);
-    state.adjacency.get(fromId).add(toId);
-    state.adjacency.get(toId).add(fromId);
-    return seg;
-  },
-  removeSegment(id) {
-    const seg = state.segments.get(id);
-    if (!seg) return;
-    state.adjacency.get(seg.from)?.delete(seg.to);
-    state.adjacency.get(seg.to)?.delete(seg.from);
-    state.segments.delete(id);
-    state.segmentReservation.delete(id);
-  },
-  recalcDistances() {
-    for (const seg of state.segments.values()) {
-      const nf = state.nodes.get(seg.from), nt = state.nodes.get(seg.to);
-      const dx = nt.x - nf.x, dy = nt.y - nf.y;
-      seg.distance = Math.sqrt(dx*dx + dy*dy) * state.config.scale;
-    }
-  },
-  getSegmentBetween(a, b) {
-    for (const seg of state.segments.values()) {
-      if ((seg.from === a && seg.to === b) || (seg.from === b && seg.to === a)) return seg;
-    }
-    return null;
-  },
-  findNearNode(x, y, radius = 15) {
-    let best = null, bestD = radius;
-    for (const n of state.nodes.values()) {
-      const d = Math.hypot(n.x - x, n.y - y);
-      if (d < bestD) { bestD = d; best = n; }
-    }
-    return best;
-  },
-  findNearSegment(x, y, threshold = 8) {
-    let best = null, bestD = threshold;
-    for (const seg of state.segments.values()) {
-      const a = state.nodes.get(seg.from), b = state.nodes.get(seg.to);
-      const d = pointToSegmentDist(x, y, a.x, a.y, b.x, b.y);
-      if (d < bestD) { bestD = d; best = seg; }
-    }
-    return best;
-  }
-};
-
 function pointToSegmentDist(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
   const lenSq = dx*dx + dy*dy;
@@ -303,50 +234,338 @@ function pointToSegmentDist(px, py, ax, ay, bx, by) {
 }
 
 // ============================================================
-// CORE - Pathfinder (Dijkstra)
+// CORE - Graph Manager
 // ============================================================
-const pathfinder = {
-  findPath(startId, targetIds) {
-    if (!startId || targetIds.length === 0) return null;
-    const targets = new Set(targetIds);
-    if (targets.has(startId)) return [startId];
-    const dist = new Map(), prev = new Map(), visited = new Set();
-    const pq = []; // [distance, nodeId]
-    dist.set(startId, 0);
-    pq.push([0, startId]);
-    while (pq.length > 0) {
-      pq.sort((a,b) => a[0] - b[0]);
-      const [d, u] = pq.shift();
-      if (visited.has(u)) continue;
-      visited.add(u);
-      if (targets.has(u)) {
-        const path = [];
-        let cur = u;
-        while (cur !== undefined) { path.unshift(cur); cur = prev.get(cur); }
-        return path;
+const graphManager = {
+  addNode(type, x, y, label) {
+    const id = 'n' + (++state.nodeCounter);
+    const node = { id, type, x, y, label: label || this._defaultLabel(type) };
+    state.nodes.set(id, node);
+    state.adjacency.set(id, new Set());
+    return node;
+  },
+
+  _defaultLabel(type) {
+    let count = 0;
+    for (const n of state.nodes.values()) { if (n.type === type) count++; }
+    const names = { pickup: 'Pickup', dropoff: 'DropOff', home: 'Home', waypoint: 'WP' };
+    return `${names[type]} ${String.fromCharCode(65 + count)}`;
+  },
+
+  removeNode(id) {
+    const toRemove = [];
+    for (const [sid, seg] of state.segments) {
+      if (seg.from === id || seg.to === id) toRemove.push(sid);
+    }
+    toRemove.forEach(sid => this.removeSegment(sid));
+    state.adjacency.delete(id);
+    for (const adj of state.adjacency.values()) adj.delete(id);
+    state.nodes.delete(id);
+    this._rebuildLoopOrder();
+  },
+
+  // ループセグメントを追加
+  addLoopSegment(fromId, toId) {
+    if (fromId === toId) return { ok: false, msg: '同一ノードには接続できません' };
+    const nf = state.nodes.get(fromId), nt = state.nodes.get(toId);
+    if (!nf || !nt) return { ok: false, msg: 'ノードが見つかりません' };
+
+    // 型チェック
+    const loopTypes = ['pickup', 'dropoff', 'waypoint'];
+    if (!loopTypes.includes(nf.type)) return { ok: false, msg: `${nf.label} はループ部に配置できません（Homeノードはループ外）` };
+    if (!loopTypes.includes(nt.type)) return { ok: false, msg: `${nt.label} はループ部に配置できません（Homeノードはループ外）` };
+
+    // 重複チェック
+    if (this.getSegmentBetween(fromId, toId)) return { ok: false, msg: 'すでにセグメントが存在します' };
+
+    // ループ内次数チェック
+    if (this.getLoopDegree(fromId) >= 2) return { ok: false, msg: `${nf.label} にはすでに2本のループセグメントがあります（分岐不可）` };
+    if (this.getLoopDegree(toId) >= 2) return { ok: false, msg: `${nt.label} にはすでに2本のループセグメントがあります（分岐不可）` };
+
+    const seg = this._createSegment(fromId, toId);
+    state.loopSegments.add(seg.id);
+    this._rebuildLoopOrder();
+    return { ok: true, seg };
+  },
+
+  // Home枝セグメントを追加
+  addHomeSegment(loopNodeId, homeNodeId) {
+    const loopNode = state.nodes.get(loopNodeId);
+    const homeNode = state.nodes.get(homeNodeId);
+    if (!loopNode || !homeNode) return { ok: false, msg: 'ノードが見つかりません' };
+
+    // 型チェック
+    if (homeNode.type !== 'home') return { ok: false, msg: `${homeNode.label} はHomeノードではありません` };
+    const loopTypes = ['pickup', 'dropoff', 'waypoint'];
+    if (!loopTypes.includes(loopNode.type)) return { ok: false, msg: `接続元はPickup/DropOff/Waypointである必要があります` };
+
+    // Homeノードの次数チェック（リーフ必須）
+    if ((state.adjacency.get(homeNodeId) || new Set()).size > 0) {
+      return { ok: false, msg: `${homeNode.label} はすでに接続されています（リーフノード必須）` };
+    }
+
+    // 重複チェック
+    if (this.getSegmentBetween(loopNodeId, homeNodeId)) return { ok: false, msg: 'すでにセグメントが存在します' };
+
+    const seg = this._createSegment(loopNodeId, homeNodeId);
+    state.homeSegments.add(seg.id);
+    return { ok: true, seg };
+  },
+
+  _createSegment(fromId, toId) {
+    const id = 's' + (++state.segCounter);
+    const nf = state.nodes.get(fromId), nt = state.nodes.get(toId);
+    const dx = nt.x - nf.x, dy = nt.y - nf.y;
+    const seg = { id, from: fromId, to: toId, distance: Math.sqrt(dx*dx + dy*dy) * state.config.scale };
+    state.segments.set(id, seg);
+    state.adjacency.get(fromId).add(toId);
+    state.adjacency.get(toId).add(fromId);
+    return seg;
+  },
+
+  removeSegment(id) {
+    const seg = state.segments.get(id);
+    if (!seg) return;
+    state.adjacency.get(seg.from)?.delete(seg.to);
+    state.adjacency.get(seg.to)?.delete(seg.from);
+    state.segments.delete(id);
+    state.loopSegments.delete(id);
+    state.homeSegments.delete(id);
+    state.segmentReservation.delete(id);
+    this._rebuildLoopOrder();
+  },
+
+  // ループ内の次数を返す
+  getLoopDegree(nodeId) {
+    let deg = 0;
+    for (const segId of state.loopSegments) {
+      const seg = state.segments.get(segId);
+      if (seg && (seg.from === nodeId || seg.to === nodeId)) deg++;
+    }
+    return deg;
+  },
+
+  // ループが完成しているか
+  isLoopComplete() {
+    const loopNodes = this._getLoopNodes();
+    if (loopNodes.size < 2) return false;
+    // 最小ループ: 2ノード1セグメント
+    if (loopNodes.size === 2 && state.loopSegments.size === 1) return true;
+    // 閉ループ: 全ループノードが次数2
+    for (const nid of loopNodes) {
+      if (this.getLoopDegree(nid) !== 2) return false;
+    }
+    return loopNodes.size >= 3;
+  },
+
+  _getLoopNodes() {
+    const loopNodes = new Set();
+    for (const segId of state.loopSegments) {
+      const seg = state.segments.get(segId);
+      if (seg) { loopNodes.add(seg.from); loopNodes.add(seg.to); }
+    }
+    return loopNodes;
+  },
+
+  // ループ順序配列を再構築
+  _rebuildLoopOrder() {
+    const loopNodes = this._getLoopNodes();
+    if (loopNodes.size < 2) { state.loopOrder = [...loopNodes]; return; }
+
+    // ループ用隣接リストを構築
+    const loopAdj = new Map();
+    for (const nid of loopNodes) loopAdj.set(nid, []);
+    for (const segId of state.loopSegments) {
+      const seg = state.segments.get(segId);
+      if (seg) {
+        loopAdj.get(seg.from)?.push(seg.to);
+        loopAdj.get(seg.to)?.push(seg.from);
       }
-      const neighbors = state.adjacency.get(u);
-      if (!neighbors) continue;
-      for (const v of neighbors) {
-        if (visited.has(v)) continue;
-        const seg = graphManager.getSegmentBetween(u, v);
-        if (!seg) continue;
-        const nd = d + seg.distance;
-        if (!dist.has(v) || nd < dist.get(v)) {
-          dist.set(v, nd);
-          prev.set(v, u);
-          pq.push([nd, v]);
-        }
+    }
+
+    // 始点からトラバース
+    const start = loopNodes.values().next().value;
+    const order = [start];
+    let prev = null, cur = start;
+    while (order.length < loopNodes.size) {
+      const neighbors = loopAdj.get(cur) || [];
+      const next = neighbors.find(n => n !== prev);
+      if (!next) break;
+      order.push(next);
+      prev = cur;
+      cur = next;
+    }
+    state.loopOrder = order;
+  },
+
+  recalcDistances() {
+    for (const seg of state.segments.values()) {
+      const nf = state.nodes.get(seg.from), nt = state.nodes.get(seg.to);
+      if (nf && nt) {
+        const dx = nt.x - nf.x, dy = nt.y - nf.y;
+        seg.distance = Math.sqrt(dx*dx + dy*dy) * state.config.scale;
       }
+    }
+  },
+
+  getSegmentBetween(a, b) {
+    for (const seg of state.segments.values()) {
+      if ((seg.from === a && seg.to === b) || (seg.from === b && seg.to === a)) return seg;
     }
     return null;
   },
-  findNearestOfType(startId, type) {
-    const targets = [];
+
+  findNearNode(x, y, radius = 15) {
+    let best = null, bestD = radius;
     for (const n of state.nodes.values()) {
-      if (n.type === type) targets.push(n.id);
+      const d = Math.hypot(n.x - x, n.y - y);
+      if (d < bestD) { bestD = d; best = n; }
     }
-    return this.findPath(startId, targets);
+    return best;
+  },
+
+  findNearSegment(x, y, threshold = 8) {
+    let best = null, bestD = threshold;
+    for (const seg of state.segments.values()) {
+      const a = state.nodes.get(seg.from), b = state.nodes.get(seg.to);
+      if (!a || !b) continue;
+      const d = pointToSegmentDist(x, y, a.x, a.y, b.x, b.y);
+      if (d < bestD) { bestD = d; best = seg; }
+    }
+    return best;
+  }
+};
+
+// ============================================================
+// CORE - Pathfinder (Loop Trace)
+// ============================================================
+const pathfinder = {
+  // ループ上の2方向探索
+  // startId: ループ部のノードID, targetIds: 目的ノードID配列
+  // returns: ノードID配列（パス）またはnull
+  findLoopPath(startId, targetIds) {
+    const { loopOrder } = state;
+    if (!loopOrder.length) return null;
+    const startIdx = loopOrder.indexOf(startId);
+    if (startIdx === -1) return null;
+    const N = loopOrder.length;
+    const targets = new Set(targetIds);
+    if (targets.has(startId)) return [startId];
+
+    // 最小ループ (2ノード)
+    if (N === 2) {
+      const other = loopOrder[1 - startIdx];
+      if (targets.has(other)) return [startId, other];
+      return null;
+    }
+
+    // CW探索
+    let cwDist = 0, cwPath = null;
+    {
+      const path = [startId];
+      for (let i = 1; i < N; i++) {
+        const nodeId = loopOrder[(startIdx + i) % N];
+        const prevId = loopOrder[(startIdx + i - 1) % N];
+        const seg = graphManager.getSegmentBetween(prevId, nodeId);
+        cwDist += seg ? seg.distance : Infinity;
+        path.push(nodeId);
+        if (targets.has(nodeId)) { cwPath = [...path]; break; }
+      }
+    }
+
+    // CCW探索
+    let ccwDist = 0, ccwPath = null;
+    {
+      const path = [startId];
+      for (let i = 1; i < N; i++) {
+        const nodeId = loopOrder[(startIdx - i + N) % N];
+        const nextId = loopOrder[(startIdx - i + 1 + N) % N];
+        const seg = graphManager.getSegmentBetween(nextId, nodeId);
+        ccwDist += seg ? seg.distance : Infinity;
+        path.push(nodeId);
+        if (targets.has(nodeId)) { ccwPath = [...path]; break; }
+      }
+    }
+
+    if (!cwPath && !ccwPath) return null;
+    if (!cwPath) return ccwPath;
+    if (!ccwPath) return cwPath;
+    return cwDist <= ccwDist ? cwPath : ccwPath;
+  },
+
+  // Homeノードから目的ノードへのパス（Home枝→ループ→target）
+  findFromHome(homeId, targetIds) {
+    const homeAdj = [...(state.adjacency.get(homeId) || [])];
+    if (!homeAdj.length) return null;
+    const connectNode = homeAdj[0]; // ループ部へのゲートノード
+    const loopPath = this.findLoopPath(connectNode, targetIds);
+    if (!loopPath) return null;
+    if (loopPath[0] === homeId) return loopPath;
+    return [homeId, ...loopPath];
+  },
+
+  // ループ部ノードから最寄りHomeへのパス（ループ→Home枝）
+  findToHome(startId) {
+    const homes = [...state.nodes.values()].filter(n => n.type === 'home');
+    if (!homes.length) return null;
+
+    let bestPath = null, bestDist = Infinity;
+    for (const home of homes) {
+      const homeAdj = [...(state.adjacency.get(home.id) || [])];
+      if (!homeAdj.length) continue;
+      const connectNode = homeAdj[0];
+      const loopPath = this.findLoopPath(startId, [connectNode]);
+      if (!loopPath) continue;
+      const fullPath = [...loopPath, home.id];
+      const dist = this._pathDistance(fullPath);
+      if (dist < bestDist) { bestDist = dist; bestPath = fullPath; }
+    }
+    return bestPath;
+  },
+
+  // ループ部でのタスク探索（利用可能Pickupの最近傍）
+  // excludeIds: 他AMRが割り当て済みのPickupIDセット
+  findNearestPickupOnLoop(startId, excludeIds) {
+    const targets = [...state.nodes.values()]
+      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id))
+      .map(n => n.id);
+    if (!targets.length) return null;
+
+    let bestPath = null, bestDist = Infinity;
+    for (const tid of targets) {
+      const path = this.findLoopPath(startId, [tid]);
+      if (!path) continue;
+      const dist = this._pathDistance(path);
+      if (dist < bestDist) { bestDist = dist; bestPath = path; }
+    }
+    return bestPath;
+  },
+
+  // ループ部でのDropOff探索（最近傍）
+  findNearestDropoffOnLoop(startId) {
+    const targets = [...state.nodes.values()]
+      .filter(n => n.type === 'dropoff')
+      .map(n => n.id);
+    if (!targets.length) return null;
+    return this.findLoopPath(startId, targets);
+  },
+
+  // Homeからのタスク探索
+  findNearestPickupFromHome(homeId, excludeIds) {
+    const targets = [...state.nodes.values()]
+      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id))
+      .map(n => n.id);
+    if (!targets.length) return null;
+    return this.findFromHome(homeId, targets);
+  },
+
+  _pathDistance(path) {
+    let d = 0;
+    for (let i = 0; i < path.length - 1; i++) {
+      const seg = graphManager.getSegmentBetween(path[i], path[i+1]);
+      if (seg) d += seg.distance;
+    }
+    return d;
   }
 };
 
@@ -371,10 +590,6 @@ const collisionManager = {
     for (const [sid, owner] of state.segmentReservation) {
       if (owner === amrId) state.segmentReservation.delete(sid);
     }
-  },
-  isOccupiedByOther(amrId, segId) {
-    const owner = state.segmentReservation.get(segId);
-    return owner && owner !== amrId;
   }
 };
 
@@ -388,31 +603,32 @@ const simEngine = {
     state.totalDeliveries = 0;
     state.cycleRecords = [];
     state.segmentReservation.clear();
+
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
-    const count = state.config.amrCount;
+    const count = Math.min(state.config.amrCount, 10);
+
     for (let i = 0; i < count; i++) {
-      const home = homes[i % homes.length] || homes[0];
+      const home = homes[i % homes.length];
       if (!home) continue;
       state.amrs.push({
-        id: 'amr_' + (i+1),
-        label: 'AMR-' + (i+1),
-        state: 'idle',
+        id: 'amr_' + (i + 1),
+        label: 'AMR-' + (i + 1),
+        state: 'at_home',
         currentSegment: null,
-        positionOnSegment: 0,
-        x: home ? home.x : 0,
-        y: home ? home.y : 0,
+        x: home.x,
+        y: home.y,
+        currentNodeId: home.id,
         currentPath: null,
         pathIndex: 0,
-        currentNodeId: home ? home.id : null,
-        targetNodeId: null,
         hasCargo: false,
         taskCount: 0,
         totalCycleTime: 0,
-        currentCycleStart: 0,
+        cycleStartTime: null,     // Pickup到着時刻
         waitTimer: 0,
-        waitingTime: 0,
         totalWaitingTime: 0,
+        waitDeadlockTimer: 0,
         assignedPickup: null,
+        assignedDropoff: null,
         direction: 0,
         blinkTimer: 0
       });
@@ -428,74 +644,144 @@ const simEngine = {
 
   _updateAMR(amr, dt) {
     switch (amr.state) {
-      case 'idle': this._handleIdle(amr); break;
-      case 'moving_to_pickup': this._handleMoving(amr, dt, 'docking'); break;
-      case 'docking': this._handleStation(amr, dt, state.config.dockingTime, 'moving_to_dropoff'); break;
+      case 'at_home':         this._handleAtHome(amr); break;
+      case 'moving_to_pickup':  this._handleMoving(amr, dt, 'docking'); break;
+      case 'docking':           this._handleDocking(amr, dt); break;
       case 'moving_to_dropoff': this._handleMoving(amr, dt, 'releasing'); break;
-      case 'releasing': this._handleStation(amr, dt, state.config.releaseTime, 'returning_home'); break;
-      case 'returning_home': this._handleMoving(amr, dt, 'idle'); break;
+      case 'releasing':         this._handleReleasing(amr, dt); break;
+      case 'returning_home':    this._handleMoving(amr, dt, 'at_home'); break;
     }
     amr.blinkTimer += dt;
   },
 
-  _handleIdle(amr) {
-    const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
-    const assigned = new Set(state.amrs.filter(a => a.assignedPickup).map(a => a.assignedPickup));
-    let bestPath = null, bestDist = Infinity;
-    for (const p of pickups) {
-      if (assigned.has(p.id)) continue;
-      const path = pathfinder.findPath(amr.currentNodeId, [p.id]);
-      if (path) {
-        const dist = this._pathDistance(path);
-        if (dist < bestDist) { bestDist = dist; bestPath = path; amr.assignedPickup = p.id; }
-      }
+  _getAssignedPickups() {
+    const assigned = new Set();
+    for (const amr of state.amrs) {
+      if (amr.assignedPickup) assigned.add(amr.assignedPickup);
     }
-    if (bestPath) {
+    return assigned;
+  },
+
+  _handleAtHome(amr) {
+    const assignedPickups = this._getAssignedPickups();
+    const path = pathfinder.findNearestPickupFromHome(amr.currentNodeId, assignedPickups);
+    if (path) {
+      amr.assignedPickup = path[path.length - 1];
       amr.state = 'moving_to_pickup';
-      amr.currentPath = bestPath;
+      amr.currentPath = path;
       amr.pathIndex = 1;
-      amr.currentCycleStart = state.simTime;
-      amr.waitingTime = 0;
       this._startSegment(amr);
     }
   },
 
+  _handleDocking(amr, dt) {
+    amr.waitTimer += dt;
+    if (amr.waitTimer >= state.config.dockingTime) {
+      amr.hasCargo = true;
+      amr.waitTimer = 0;
+      const path = pathfinder.findNearestDropoffOnLoop(amr.currentNodeId);
+      if (path && path.length > 0) {
+        amr.assignedDropoff = path[path.length - 1];
+        amr.state = 'moving_to_dropoff';
+        amr.currentPath = path;
+        amr.pathIndex = 1;
+        if (path.length > 1) this._startSegment(amr);
+      } else {
+        // DropOffなし（設定エラー）
+        amr.state = 'at_home';
+        amr.hasCargo = false;
+      }
+    }
+  },
+
+  _handleReleasing(amr, dt) {
+    amr.waitTimer += dt;
+    if (amr.waitTimer >= state.config.releaseTime) {
+      amr.hasCargo = false;
+      amr.waitTimer = 0;
+      amr.taskCount++;
+      state.totalDeliveries++;
+      amr.assignedDropoff = null;
+
+      // 次のPickupを探す（ループ上から直接）
+      const assignedPickups = this._getAssignedPickups();
+      const path = pathfinder.findNearestPickupOnLoop(amr.currentNodeId, assignedPickups);
+      if (path) {
+        amr.assignedPickup = path[path.length - 1];
+        // サイクルタイム記録（前回Pickup到着→今回Pickup到着の間は「現在」のサイクルで、
+        // 次のPickup到着で計測されるので、ここではStartを更新しない）
+        amr.state = 'moving_to_pickup';
+        amr.currentPath = path;
+        amr.pathIndex = 1;
+        if (path.length > 1) this._startSegment(amr);
+        else {
+          // 既にPickupにいる（同じノード）
+          this._onPickupArrival(amr);
+        }
+      } else {
+        // 全Pickupが占有中 → Homeへ退避
+        amr.assignedPickup = null;
+        const homePath = pathfinder.findToHome(amr.currentNodeId);
+        if (homePath) {
+          amr.state = 'returning_home';
+          amr.currentPath = homePath;
+          amr.pathIndex = 1;
+          if (homePath.length > 1) this._startSegment(amr);
+        } else {
+          amr.state = 'at_home';
+        }
+      }
+    }
+  },
+
+  _onPickupArrival(amr) {
+    // サイクルタイム計測
+    if (amr.cycleStartTime !== null) {
+      const ct = state.simTime - amr.cycleStartTime;
+      amr.totalCycleTime += ct;
+      // 初回（Home→Pickup）は記録しない
+      if (amr.taskCount > 0) {
+        state.cycleRecords.push({
+          amrId: amr.id,
+          cycleNumber: amr.taskCount,
+          totalCycleTime: ct
+        });
+      }
+    }
+    amr.cycleStartTime = state.simTime;
+    amr.state = 'docking';
+    amr.waitTimer = 0;
+  },
+
   _handleMoving(amr, dt, nextState) {
     if (!amr.currentPath || amr.pathIndex >= amr.currentPath.length) {
-      collisionManager.releaseAll(amr.id);
-      amr.currentSegment = null;
-      if (nextState === 'docking') {
-        amr.state = 'docking';
-        amr.waitTimer = 0;
-      } else if (nextState === 'releasing') {
-        amr.state = 'releasing';
-        amr.waitTimer = 0;
-      } else if (nextState === 'idle') {
-        amr.state = 'idle';
-        amr.currentPath = null;
-      }
+      this._onPathComplete(amr, nextState);
       return;
     }
+
     const targetId = amr.currentPath[amr.pathIndex];
     const target = state.nodes.get(targetId);
-    if (!target) return;
+    if (!target) { amr.pathIndex++; return; }
 
-    // Check segment reservation
-    const seg = amr.currentSegment ? state.segments.get(amr.currentSegment) : null;
-    if (!seg) {
+    // セグメント確保チェック
+    if (!amr.currentSegment) {
       this._startSegment(amr);
-      return;
+      if (!amr.currentSegment) {
+        // 待機中
+        amr.totalWaitingTime += dt;
+        amr.waitDeadlockTimer += dt;
+        return;
+      }
     }
+    amr.waitDeadlockTimer = 0;
 
     const speed = state.config.amrSpeed;
-    const moveDist = speed * dt; // meters
-    const movePx = moveDist / state.config.scale; // pixels
-
+    const movePx = (speed * dt) / state.config.scale;
     const dx = target.x - amr.x, dy = target.y - amr.y;
     const distToTarget = Math.hypot(dx, dy);
 
     if (distToTarget <= movePx) {
-      // Arrived at target node
+      // ノード到着
       amr.x = target.x;
       amr.y = target.y;
       amr.currentNodeId = targetId;
@@ -504,25 +790,11 @@ const simEngine = {
       amr.pathIndex++;
 
       if (amr.pathIndex >= amr.currentPath.length) {
-        // Reached final destination
-        collisionManager.releaseAll(amr.id);
-        if (nextState === 'docking') {
-          amr.state = 'docking';
-          amr.waitTimer = 0;
-          amr.hasCargo = false;
-        } else if (nextState === 'releasing') {
-          amr.state = 'releasing';
-          amr.waitTimer = 0;
-        } else if (nextState === 'idle') {
-          amr.state = 'idle';
-          amr.currentPath = null;
-          amr.assignedPickup = null;
-        }
+        this._onPathComplete(amr, nextState);
       } else {
         this._startSegment(amr);
       }
     } else {
-      // Move towards target
       const ratio = movePx / distToTarget;
       amr.x += dx * ratio;
       amr.y += dy * ratio;
@@ -530,9 +802,26 @@ const simEngine = {
     }
   },
 
+  _onPathComplete(amr, nextState) {
+    collisionManager.releaseAll(amr.id);
+    amr.currentSegment = null;
+    amr.currentPath = null;
+
+    if (nextState === 'docking') {
+      this._onPickupArrival(amr);
+    } else if (nextState === 'releasing') {
+      amr.state = 'releasing';
+      amr.waitTimer = 0;
+    } else if (nextState === 'at_home') {
+      amr.state = 'at_home';
+      amr.assignedPickup = null;
+    }
+  },
+
   _startSegment(amr) {
-    if (amr.pathIndex >= amr.currentPath.length) return;
-    const fromId = amr.currentPath[amr.pathIndex - 1] || amr.currentNodeId;
+    if (!amr.currentPath || amr.pathIndex >= amr.currentPath.length) return;
+    const prevIdx = amr.pathIndex - 1;
+    const fromId = prevIdx >= 0 ? amr.currentPath[prevIdx] : amr.currentNodeId;
     const toId = amr.currentPath[amr.pathIndex];
     const seg = graphManager.getSegmentBetween(fromId, toId);
     if (!seg) { amr.pathIndex++; return; }
@@ -542,60 +831,8 @@ const simEngine = {
       const target = state.nodes.get(toId);
       if (target) amr.direction = Math.atan2(target.y - amr.y, target.x - amr.x);
     } else {
-      // Waiting - can't reserve segment
-      amr.waitingTime += 0.05;
-      amr.totalWaitingTime += 0.05;
+      amr.currentSegment = null;
     }
-  },
-
-  _handleStation(amr, dt, duration, nextState) {
-    amr.waitTimer += dt;
-    if (amr.waitTimer >= duration) {
-      if (nextState === 'moving_to_dropoff') {
-        amr.hasCargo = true;
-        const path = pathfinder.findNearestOfType(amr.currentNodeId, 'dropoff');
-        if (path) {
-          amr.state = 'moving_to_dropoff';
-          amr.currentPath = path;
-          amr.pathIndex = 1;
-          this._startSegment(amr);
-        } else {
-          amr.state = 'idle';
-          amr.assignedPickup = null;
-        }
-      } else if (nextState === 'returning_home') {
-        amr.hasCargo = false;
-        amr.taskCount++;
-        state.totalDeliveries++;
-        const cycleTime = state.simTime - amr.currentCycleStart;
-        amr.totalCycleTime += cycleTime;
-        state.cycleRecords.push({
-          amrId: amr.id,
-          cycleNumber: amr.taskCount,
-          totalCycleTime: cycleTime,
-          waitingTime: amr.waitingTime
-        });
-        amr.assignedPickup = null;
-        const path = pathfinder.findNearestOfType(amr.currentNodeId, 'home');
-        if (path) {
-          amr.state = 'returning_home';
-          amr.currentPath = path;
-          amr.pathIndex = 1;
-          this._startSegment(amr);
-        } else {
-          amr.state = 'idle';
-        }
-      }
-    }
-  },
-
-  _pathDistance(path) {
-    let d = 0;
-    for (let i = 0; i < path.length - 1; i++) {
-      const seg = graphManager.getSegmentBetween(path[i], path[i+1]);
-      if (seg) d += seg.distance;
-    }
-    return d;
   }
 };
 
@@ -611,222 +848,272 @@ const renderer = {
     canvas.width = rect.width;
     canvas.height = rect.height;
   },
+
   render() {
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Background
+    // 背景
     if (state.bgImage) {
       const img = state.bgImage;
-      const scale = Math.min(w / img.width, h / img.height);
-      const iw = img.width * scale, ih = img.height * scale;
-      const ox = (w - iw) / 2, oy = (h - ih) / 2;
-      ctx.drawImage(img, ox, oy, iw, ih);
+      const sc = Math.min(w / img.width, h / img.height);
+      const iw = img.width * sc, ih = img.height * sc;
+      ctx.drawImage(img, (w - iw) / 2, (h - ih) / 2, iw, ih);
     } else {
       ctx.fillStyle = '#1a1a2e';
       ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = '#333';
+      ctx.fillStyle = '#444';
       ctx.font = '14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('📷 画像を読み込んでください', w/2, h/2);
+      ctx.fillText('📷 画像を読み込むか、ノードを配置してください', w / 2, h / 2);
     }
 
-    // Segments
+    // セグメント描画
     for (const seg of state.segments.values()) {
       const a = state.nodes.get(seg.from), b = state.nodes.get(seg.to);
       if (!a || !b) continue;
+
+      const isLoop = state.loopSegments.has(seg.id);
+      const isHome = state.homeSegments.has(seg.id);
       const isReserved = state.segmentReservation.has(seg.id);
+
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = isReserved ? 'rgba(233,69,96,0.5)' : 'rgba(150,150,150,0.6)';
-      ctx.lineWidth = isReserved ? 3 : 2;
+
+      if (isReserved) {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(249,115,22,0.7)';
+        ctx.lineWidth = 4;
+      } else if (isLoop) {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(74,222,128,0.7)';
+        ctx.lineWidth = 2.5;
+      } else if (isHome) {
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = 'rgba(96,165,250,0.7)';
+        ctx.lineWidth = 2;
+      } else {
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = 'rgba(150,150,150,0.5)';
+        ctx.lineWidth = 1.5;
+      }
       ctx.stroke();
-      // Distance label
+      ctx.setLineDash([]);
+
+      // 距離ラベル
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-      ctx.fillStyle = '#aaa';
+      ctx.fillStyle = isLoop ? '#86efac' : (isHome ? '#93c5fd' : '#aaa');
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(seg.distance.toFixed(1) + 'm', mx, my - 6);
     }
 
-    // Path creation preview
-    if (inputHandler.pathNodes.length > 0 && inputHandler.currentTool === 'path') {
+    // ループ作成プレビュー
+    const ih = inputHandler;
+    if (ih.loopPathNodes.length > 0 && ih.currentTool === 'loop-path') {
       ctx.setLineDash([5, 5]);
       ctx.strokeStyle = '#e94560';
       ctx.lineWidth = 2;
-      for (let i = 0; i < inputHandler.pathNodes.length - 1; i++) {
-        const a = state.nodes.get(inputHandler.pathNodes[i]);
-        const b = state.nodes.get(inputHandler.pathNodes[i+1]);
-        if (a && b) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+      for (let i = 0; i < ih.loopPathNodes.length - 1; i++) {
+        const na = state.nodes.get(ih.loopPathNodes[i]);
+        const nb = state.nodes.get(ih.loopPathNodes[i + 1]);
+        if (na && nb) {
+          ctx.beginPath(); ctx.moveTo(na.x, na.y); ctx.lineTo(nb.x, nb.y); ctx.stroke();
+        }
       }
-      if (inputHandler.mouseX !== null) {
-        const last = state.nodes.get(inputHandler.pathNodes[inputHandler.pathNodes.length - 1]);
-        if (last) { ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(inputHandler.mouseX, inputHandler.mouseY); ctx.stroke(); }
+      if (ih.mouseX !== null) {
+        const last = state.nodes.get(ih.loopPathNodes[ih.loopPathNodes.length - 1]);
+        if (last) {
+          ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(ih.mouseX, ih.mouseY); ctx.stroke();
+        }
       }
       ctx.setLineDash([]);
     }
 
-    // Scale calibration preview
-    if (inputHandler.scalePoints.length === 1) {
-      const p = inputHandler.scalePoints[0];
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = '#e94560';
-      ctx.fill();
-      if (inputHandler.mouseX !== null) {
-        ctx.setLineDash([4, 4]);
+    // Home枝作成プレビュー
+    if (ih.currentTool === 'home-branch' && ih.homeBranchSource) {
+      const src = state.nodes.get(ih.homeBranchSource);
+      if (src && ih.mouseX !== null) {
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = '#60a5fa';
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(inputHandler.mouseX, inputHandler.mouseY);
-        ctx.strokeStyle = '#e94560';
-        ctx.lineWidth = 1;
+        ctx.moveTo(src.x, src.y);
+        ctx.lineTo(ih.mouseX, ih.mouseY);
         ctx.stroke();
         ctx.setLineDash([]);
-        const d = Math.hypot(inputHandler.mouseX - p.x, inputHandler.mouseY - p.y);
-        ctx.fillStyle = '#e94560';
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${d.toFixed(0)} px`, (p.x + inputHandler.mouseX)/2, (p.y + inputHandler.mouseY)/2 - 10);
       }
     }
 
-    // Nodes
+    // スケール校正プレビュー
+    if (ih.scalePoints.length === 1) {
+      const p = ih.scalePoints[0];
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#e94560'; ctx.fill();
+      if (ih.mouseX !== null) {
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(ih.mouseX, ih.mouseY);
+        ctx.strokeStyle = '#e94560'; ctx.lineWidth = 1; ctx.stroke();
+        ctx.setLineDash([]);
+        const d = Math.hypot(ih.mouseX - p.x, ih.mouseY - p.y);
+        ctx.fillStyle = '#e94560'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(`${d.toFixed(0)} px`, (p.x + ih.mouseX) / 2, (p.y + ih.mouseY) / 2 - 10);
+      }
+    }
+
+    // ノード描画
     for (const n of state.nodes.values()) {
       this._drawNode(n);
     }
 
-    // AMRs
+    // AMR描画
     for (const amr of state.amrs) {
       this._drawAMR(amr);
+    }
+
+    // Home枝接続: 選択中ノードのハイライト
+    if (ih.currentTool === 'home-branch' && ih.homeBranchSource) {
+      const src = state.nodes.get(ih.homeBranchSource);
+      if (src) {
+        ctx.beginPath();
+        ctx.arc(src.x, src.y, 18, 0, Math.PI * 2);
+        ctx.strokeStyle = '#60a5fa';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // ループ作成: 始点ハイライト
+    if (ih.currentTool === 'loop-path' && ih.loopPathNodes.length > 0) {
+      const startNode = state.nodes.get(ih.loopPathNodes[0]);
+      if (startNode) {
+        ctx.beginPath();
+        ctx.arc(startNode.x, startNode.y, 18, 0, Math.PI * 2);
+        ctx.strokeStyle = '#e94560';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
   },
 
   _drawNode(n) {
     ctx.save();
+    ctx.textBaseline = 'middle';
     switch (n.type) {
       case 'pickup':
         ctx.fillStyle = '#22c55e';
         ctx.fillRect(n.x - 10, n.y - 10, 20, 20);
-        ctx.strokeStyle = '#166534';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#166534'; ctx.lineWidth = 1.5;
         ctx.strokeRect(n.x - 10, n.y - 10, 20, 20);
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('P', n.x, n.y);
         break;
       case 'dropoff':
         ctx.fillStyle = '#ef4444';
         ctx.fillRect(n.x - 10, n.y - 10, 20, 20);
-        ctx.strokeStyle = '#991b1b';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#991b1b'; ctx.lineWidth = 1.5;
         ctx.strokeRect(n.x - 10, n.y - 10, 20, 20);
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('D', n.x, n.y);
         break;
       case 'home':
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = '#3b82f6';
-        ctx.fill();
-        ctx.strokeStyle = '#1e40af';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 9px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.beginPath(); ctx.arc(n.x, n.y, 10, 0, Math.PI * 2);
+        ctx.fillStyle = '#3b82f6'; ctx.fill();
+        ctx.strokeStyle = '#1e40af'; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('H', n.x, n.y);
         break;
       case 'waypoint':
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#9ca3af';
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(n.x, n.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#9ca3af'; ctx.fill();
+        ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 1; ctx.stroke();
         break;
     }
-    // Label
     if (n.type !== 'waypoint') {
-      ctx.fillStyle = '#ddd';
-      ctx.font = '10px sans-serif';
-      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ddd'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
       ctx.fillText(n.label, n.x, n.y - 16);
     }
     ctx.restore();
   },
 
   _drawAMR(amr) {
-    const blink = amr.state === 'docking' || amr.state === 'releasing';
-    if (blink && Math.floor(amr.blinkTimer * 3) % 2 === 0) {
-      // Blinking off phase - draw dimmer
+    const isStation = amr.state === 'docking' || amr.state === 'releasing';
+    if (isStation && Math.floor(amr.blinkTimer * 3) % 2 === 0) {
       ctx.globalAlpha = 0.4;
     }
 
-    // Cargo (drawn behind AMR)
+    // 台車（AMR後方）
     if (amr.hasCargo) {
       ctx.save();
       ctx.translate(amr.x, amr.y);
       ctx.rotate(amr.direction);
       ctx.fillStyle = '#666';
-      ctx.fillRect(-18, -5, 8, 10);
+      ctx.fillRect(-20, -5, 9, 10);
       ctx.restore();
     }
 
-    // AMR body
+    // AMR本体
     ctx.save();
     ctx.translate(amr.x, amr.y);
     ctx.rotate(amr.direction);
-    ctx.beginPath();
-    ctx.arc(0, 0, 7, 0, Math.PI * 2);
-    ctx.fillStyle = '#f97316';
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2);
+    ctx.fillStyle = amr.state === 'at_home' ? '#94a3b8' : '#f97316';
     ctx.fill();
-    ctx.strokeStyle = '#c2410c';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    // Direction arrow
-    ctx.beginPath();
-    ctx.moveTo(7, 0);
-    ctx.lineTo(11, -3);
-    ctx.lineTo(11, 3);
-    ctx.closePath();
-    ctx.fillStyle = '#fff';
-    ctx.fill();
+    ctx.strokeStyle = amr.state === 'at_home' ? '#64748b' : '#c2410c';
+    ctx.lineWidth = 1.5; ctx.stroke();
+    // 方向矢印
+    ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(11, -3); ctx.lineTo(11, 3); ctx.closePath();
+    ctx.fillStyle = '#fff'; ctx.fill();
     ctx.restore();
 
     ctx.globalAlpha = 1;
 
-    // Label
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 9px sans-serif';
-    ctx.textAlign = 'center';
+    // ラベル
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(amr.label, amr.x, amr.y - 12);
 
-    // State indicator
+    // 状態テキスト
     let stateText = '';
     switch (amr.state) {
-      case 'idle': stateText = '待機'; break;
-      case 'docking': stateText = 'Dock'; break;
-      case 'releasing': stateText = 'Release'; break;
+      case 'at_home':      stateText = '待機'; break;
+      case 'docking':      stateText = 'Dock'; break;
+      case 'releasing':    stateText = 'Rel'; break;
+      case 'returning_home': stateText = '帰還'; break;
     }
     if (stateText) {
-      ctx.fillStyle = '#4fc3f7';
-      ctx.font = '8px sans-serif';
-      ctx.fillText(stateText, amr.x, amr.y + 16);
+      ctx.fillStyle = '#4fc3f7'; ctx.font = '8px sans-serif';
+      ctx.fillText(stateText, amr.x, amr.y + 18);
     }
   }
 };
+
+// ============================================================
+// UI - Notification
+// ============================================================
+let notifTimer = null;
+function showNotif(msg, type = 'error') {
+  const el = document.getElementById('notification');
+  el.textContent = msg;
+  el.className = type;
+  el.style.display = 'block';
+  clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
 
 // ============================================================
 // UI - Input Handler
 // ============================================================
 const inputHandler = {
   currentTool: 'select',
-  pathNodes: [],
+  loopPathNodes: [],         // ループ作成中の選択ノード列
+  loopPathSegIds: [],        // ループ作成中に追加したセグメントID列
+  homeBranchSource: null,    // Home枝接続の接続元ノードID
   scalePoints: [],
   draggingNode: null,
   mouseX: null,
@@ -835,23 +1122,37 @@ const inputHandler = {
   init() {
     canvas.addEventListener('mousedown', e => this._onMouseDown(e));
     canvas.addEventListener('mousemove', e => this._onMouseMove(e));
-    canvas.addEventListener('mouseup', e => this._onMouseUp(e));
-    canvas.addEventListener('dblclick', e => this._onDblClick(e));
+    canvas.addEventListener('mouseup', () => { this.draggingNode = null; });
     canvas.addEventListener('contextmenu', e => this._onContextMenu(e));
-    document.addEventListener('click', () => {
-      document.getElementById('context-menu').style.display = 'none';
+    document.addEventListener('click', e => {
+      if (!e.target.closest('#context-menu')) {
+        document.getElementById('context-menu').style.display = 'none';
+      }
     });
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && this.currentTool === 'path' && this.pathNodes.length > 0) {
-        this.pathNodes = [];
-        renderer.render();
-      }
+      if (e.key === 'Escape') this._onEscape();
     });
   },
 
   _getPos(e) {
     const rect = canvas.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  },
+
+  _onEscape() {
+    if (this.currentTool === 'loop-path' && this.loopPathNodes.length > 0) {
+      // 作成中のセグメントを全て破棄
+      for (const sid of this.loopPathSegIds) {
+        graphManager.removeSegment(sid);
+      }
+      this.loopPathNodes = [];
+      this.loopPathSegIds = [];
+      showNotif('ループ作成をキャンセルしました', 'info');
+      renderer.render();
+    } else if (this.currentTool === 'home-branch' && this.homeBranchSource) {
+      this.homeBranchSource = null;
+      renderer.render();
+    }
   },
 
   _onMouseDown(e) {
@@ -861,19 +1162,14 @@ const inputHandler = {
 
     if (tool === 'select') {
       const node = graphManager.findNearNode(pos.x, pos.y);
-      if (node) { this.draggingNode = node; }
+      if (node) this.draggingNode = node;
     } else if (['pickup', 'dropoff', 'home', 'waypoint'].includes(tool)) {
       graphManager.addNode(tool, pos.x, pos.y);
       renderer.render();
-    } else if (tool === 'path') {
-      const node = graphManager.findNearNode(pos.x, pos.y);
-      if (node) {
-        if (this.pathNodes.length > 0) {
-          graphManager.addSegment(this.pathNodes[this.pathNodes.length - 1], node.id);
-        }
-        this.pathNodes.push(node.id);
-        renderer.render();
-      }
+    } else if (tool === 'loop-path') {
+      this._handleLoopPathClick(pos);
+    } else if (tool === 'home-branch') {
+      this._handleHomeBranchClick(pos);
     } else if (tool === 'delete') {
       const node = graphManager.findNearNode(pos.x, pos.y);
       if (node) { graphManager.removeNode(node.id); }
@@ -885,9 +1181,8 @@ const inputHandler = {
     } else if (tool === 'scale') {
       this.scalePoints.push(pos);
       if (this.scalePoints.length === 2) {
-        const p1 = this.scalePoints[0], p2 = this.scalePoints[1];
-        const pxDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-        inputHandler._scalePixelDist = pxDist;
+        const [p1, p2] = this.scalePoints;
+        this._scalePixelDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
         document.getElementById('scale-modal').style.display = 'block';
         document.getElementById('scale-distance-input').value = '';
         document.getElementById('scale-distance-input').focus();
@@ -895,6 +1190,103 @@ const inputHandler = {
         this.currentTool = 'select';
         uiController.updateToolButtons();
       }
+      renderer.render();
+    }
+  },
+
+  _handleLoopPathClick(pos) {
+    const node = graphManager.findNearNode(pos.x, pos.y);
+    if (!node) return;
+
+    // Homeノードはブロック
+    if (node.type === 'home') {
+      showNotif('Homeノードはループ部に配置できません', 'error');
+      return;
+    }
+
+    if (this.loopPathNodes.length === 0) {
+      // 始点として選択
+      this.loopPathNodes = [node.id];
+      showNotif(`始点: ${node.label} を選択。次のノードをクリックしてください`, 'info');
+      renderer.render();
+      return;
+    }
+
+    const startId = this.loopPathNodes[0];
+    const lastId = this.loopPathNodes[this.loopPathNodes.length - 1];
+
+    // 始点をクリック → ループ閉じる（3ノード以上）
+    if (node.id === startId && this.loopPathNodes.length >= 2) {
+      const result = graphManager.addLoopSegment(lastId, startId);
+      if (!result.ok) {
+        showNotif(result.msg, 'error');
+        return;
+      }
+      this.loopPathSegIds.push(result.seg.id);
+      this.loopPathNodes = [];
+      this.loopPathSegIds = [];
+      showNotif('ループが完成しました！', 'success');
+      renderer.render();
+      return;
+    }
+
+    // 同じノードを再クリック → 無視
+    if (node.id === lastId) return;
+
+    // 新しいノードへのセグメントを追加
+    const result = graphManager.addLoopSegment(lastId, node.id);
+    if (!result.ok) {
+      showNotif(result.msg, 'error');
+      return;
+    }
+    this.loopPathSegIds.push(result.seg.id);
+    this.loopPathNodes.push(node.id);
+
+    // ループ完成チェック（最小ループ A↔B）
+    if (graphManager.isLoopComplete()) {
+      this.loopPathNodes = [];
+      this.loopPathSegIds = [];
+      showNotif('最小ループ（A↔B）が完成しました！', 'success');
+    } else {
+      const isStart = this.loopPathNodes.length > 1 &&
+        graphManager.getSegmentBetween(node.id, startId) !== null;
+      showNotif(`${node.label} を追加。始点をクリックでループ閉じる（現在${this.loopPathNodes.length}ノード）`, 'info');
+    }
+    renderer.render();
+  },
+
+  _handleHomeBranchClick(pos) {
+    if (!graphManager.isLoopComplete()) {
+      showNotif('ループ部を先に完成させてください', 'error');
+      return;
+    }
+    const node = graphManager.findNearNode(pos.x, pos.y);
+    if (!node) return;
+
+    if (!this.homeBranchSource) {
+      // 接続元選択（ループ部ノードのみ）
+      const loopTypes = ['pickup', 'dropoff', 'waypoint'];
+      if (!loopTypes.includes(node.type)) {
+        showNotif('接続元はPickup/DropOff/Waypointを選択してください', 'error');
+        return;
+      }
+      this.homeBranchSource = node.id;
+      showNotif(`接続元: ${node.label} を選択。Homeノードをクリックしてください`, 'info');
+      renderer.render();
+    } else {
+      // Homeノードを選択して接続
+      if (node.id === this.homeBranchSource) {
+        this.homeBranchSource = null;
+        renderer.render();
+        return;
+      }
+      const result = graphManager.addHomeSegment(this.homeBranchSource, node.id);
+      if (!result.ok) {
+        showNotif(result.msg, 'error');
+      } else {
+        showNotif(`Home枝を接続しました: ${state.nodes.get(this.homeBranchSource).label} → ${node.label}`, 'success');
+      }
+      this.homeBranchSource = null;
       renderer.render();
     }
   },
@@ -907,25 +1299,8 @@ const inputHandler = {
       this.draggingNode.x = pos.x;
       this.draggingNode.y = pos.y;
       graphManager.recalcDistances();
-      renderer.render();
     }
-    if (this.currentTool === 'path' && this.pathNodes.length > 0) {
-      renderer.render();
-    }
-    if (this.currentTool === 'scale' && this.scalePoints.length === 1) {
-      renderer.render();
-    }
-  },
-
-  _onMouseUp(e) {
-    this.draggingNode = null;
-  },
-
-  _onDblClick(e) {
-    if (this.currentTool === 'path' && this.pathNodes.length > 0) {
-      this.pathNodes = [];
-      renderer.render();
-    }
+    renderer.render();
   },
 
   _onContextMenu(e) {
@@ -946,7 +1321,7 @@ const inputHandler = {
   _scalePixelDist: 0
 };
 
-// Context menu handler
+// Context menu
 document.querySelector('#context-menu .cm-item[data-action="delete"]').addEventListener('click', () => {
   const menu = document.getElementById('context-menu');
   if (menu._isNode) graphManager.removeNode(menu._target.id);
@@ -955,7 +1330,7 @@ document.querySelector('#context-menu .cm-item[data-action="delete"]').addEventL
   renderer.render();
 });
 
-// Scale modal handlers
+// Scale modal
 document.getElementById('scale-ok').addEventListener('click', () => {
   const dist = parseFloat(document.getElementById('scale-distance-input').value);
   if (dist > 0 && inputHandler._scalePixelDist > 0) {
@@ -975,7 +1350,7 @@ document.getElementById('scale-cancel').addEventListener('click', () => {
 // ============================================================
 const uiController = {
   init() {
-    // Tool buttons
+    // ツールボタン
     document.querySelectorAll('.tool-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const tool = btn.dataset.tool;
@@ -984,29 +1359,30 @@ const uiController = {
           return;
         }
         inputHandler.currentTool = tool;
-        inputHandler.pathNodes = [];
+        inputHandler.loopPathNodes = [];
+        inputHandler.loopPathSegIds = [];
+        inputHandler.homeBranchSource = null;
         inputHandler.scalePoints = [];
         this.updateToolButtons();
+        renderer.render();
       });
     });
 
-    // Image input
+    // 画像読込
     document.getElementById('image-input').addEventListener('change', e => {
       const file = e.target.files[0];
       if (!file) return;
       const img = new Image();
-      img.onload = () => {
-        state.bgImage = img;
-        renderer.render();
-      };
+      img.onload = () => { state.bgImage = img; renderer.render(); };
       img.src = URL.createObjectURL(file);
+      e.target.value = '';
     });
 
-    // Params
+    // パラメータ
     document.getElementById('param-speed').addEventListener('change', e => { state.config.amrSpeed = parseFloat(e.target.value) || 1.0; });
     document.getElementById('param-docking').addEventListener('change', e => { state.config.dockingTime = parseFloat(e.target.value) || 30; });
     document.getElementById('param-release').addEventListener('change', e => { state.config.releaseTime = parseFloat(e.target.value) || 20; });
-    document.getElementById('param-amr-count').addEventListener('change', e => { state.config.amrCount = parseInt(e.target.value) || 1; });
+    document.getElementById('param-amr-count').addEventListener('change', e => { state.config.amrCount = Math.min(10, Math.max(1, parseInt(e.target.value) || 1)); });
     document.getElementById('param-scale').addEventListener('change', e => {
       state.config.scale = parseFloat(e.target.value) || 0.1;
       graphManager.recalcDistances();
@@ -1018,21 +1394,20 @@ const uiController = {
       document.querySelector('#btn-fast-forward .btn-label').textContent = 'x' + state.config.ffSpeed;
     });
 
-    // Sim controls
+    // シミュレーション制御
     document.getElementById('btn-play-pause').addEventListener('click', () => this._togglePlayPause());
     document.getElementById('btn-fast-forward').addEventListener('click', () => this._toggleFastForward());
     document.getElementById('btn-reset').addEventListener('click', () => this._reset());
 
-    // Toggle pane
+    // 左ペイン折りたたみ
     document.getElementById('toggle-pane').addEventListener('click', () => {
       const pane = document.getElementById('left-pane');
       pane.classList.toggle('collapsed');
-      document.getElementById('toggle-pane').innerHTML = pane.classList.contains('collapsed') ? '&raquo;' : '&laquo;';
-      setTimeout(() => renderer.resize(), 350);
-      setTimeout(() => renderer.render(), 360);
+      document.getElementById('toggle-pane').innerHTML =
+        pane.classList.contains('collapsed') ? '&raquo;' : '&laquo;';
+      setTimeout(() => { renderer.resize(); renderer.render(); }, 350);
     });
 
-    // Resize
     window.addEventListener('resize', () => { renderer.resize(); renderer.render(); });
   },
 
@@ -1042,20 +1417,39 @@ const uiController = {
     });
   },
 
+  _validateForSim() {
+    if (!graphManager.isLoopComplete()) {
+      showNotif('ループ経路が未完成です。ループ経路作成ツールでループを作成してください', 'error');
+      return false;
+    }
+    const homes = [...state.nodes.values()].filter(n => n.type === 'home');
+    if (homes.length === 0) {
+      showNotif('待機エリア（Home）を少なくとも1つ配置してください', 'error');
+      return false;
+    }
+    const hasHomeWithBranch = homes.some(h => (state.adjacency.get(h.id) || new Set()).size > 0);
+    if (!hasHomeWithBranch) {
+      showNotif('待機エリアをループ部に接続してください（Home枝接続ツール⎇を使用）', 'error');
+      return false;
+    }
+    const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
+    if (pickups.length === 0) {
+      showNotif('Pickup Stationを少なくとも1つ配置してください', 'error');
+      return false;
+    }
+    const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
+    if (dropoffs.length === 0) {
+      showNotif('DropOff Stationを少なくとも1つ配置してください', 'error');
+      return false;
+    }
+    return true;
+  },
+
   _togglePlayPause() {
     const btn = document.getElementById('btn-play-pause');
     if (!state.running) {
-      // Start or resume
-      if (state.amrs.length === 0) {
-        const homes = [...state.nodes.values()].filter(n => n.type === 'home');
-        const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
-        const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
-        if (homes.length === 0 || pickups.length === 0 || dropoffs.length === 0) {
-          alert('Home、Pickup、DropOff を少なくとも1つずつ配置してください');
-          return;
-        }
-        simEngine.init();
-      }
+      if (!this._validateForSim()) return;
+      if (state.amrs.length === 0) simEngine.init();
       state.running = true;
       state.paused = false;
       state.config.simSpeed = state._lastSpeed || 1;
@@ -1065,7 +1459,6 @@ const uiController = {
       lastTimestamp = performance.now();
       requestAnimationFrame(simLoop);
     } else {
-      // Pause
       state.running = false;
       state.paused = true;
       state._lastSpeed = state.config.simSpeed;
@@ -1077,22 +1470,13 @@ const uiController = {
   _toggleFastForward() {
     const ffBtn = document.getElementById('btn-fast-forward');
     if (state.config.simSpeed > 1) {
-      // Currently fast forwarding -> return to x1
       state.config.simSpeed = 1;
       ffBtn.classList.remove('active-ff');
     } else {
-      // Go to fast forward
       state.config.simSpeed = state.config.ffSpeed;
       ffBtn.classList.add('active-ff');
       if (!state.running) {
-        // Also start if stopped
-        const homes = [...state.nodes.values()].filter(n => n.type === 'home');
-        const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
-        const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
-        if (homes.length === 0 || pickups.length === 0 || dropoffs.length === 0) {
-          alert('Home、Pickup、DropOff を少なくとも1つずつ配置してください');
-          return;
-        }
+        if (!this._validateForSim()) return;
         if (state.amrs.length === 0) simEngine.init();
         state.running = true;
         state.paused = false;
@@ -1126,10 +1510,8 @@ const uiController = {
   },
 
   _updateSpeedDisplay() {
-    const disp = document.getElementById('speed-display');
-    disp.textContent = '現在: x' + state.config.simSpeed;
-    const ffBtn = document.getElementById('btn-fast-forward');
-    ffBtn.classList.toggle('active-ff', state.config.simSpeed > 1);
+    document.getElementById('speed-display').textContent = '現在: x' + state.config.simSpeed;
+    document.getElementById('btn-fast-forward').classList.toggle('active-ff', state.config.simSpeed > 1);
   },
 
   updateStats() {
@@ -1139,12 +1521,13 @@ const uiController = {
     const s = Math.floor(t % 60);
     document.getElementById('stat-time').textContent =
       `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-
     document.getElementById('stat-deliveries').textContent = state.totalDeliveries + ' 回';
 
-    if (state.totalDeliveries > 0) {
-      const totalCT = state.cycleRecords.reduce((s, r) => s + r.totalCycleTime, 0);
-      const avgCT = totalCT / state.totalDeliveries;
+    // サイクルレコードから平均を計算（初回サイクルは除く）
+    const validRecords = state.cycleRecords;
+    if (validRecords.length > 0) {
+      const totalCT = validRecords.reduce((sum, r) => sum + r.totalCycleTime, 0);
+      const avgCT = totalCT / validRecords.length;
       document.getElementById('stat-avg-ct').textContent = avgCT.toFixed(1) + ' 秒';
       const tp = t > 0 ? (state.totalDeliveries / t) * 3600 : 0;
       document.getElementById('stat-throughput').textContent = tp.toFixed(1) + ' 回/h';
@@ -1153,24 +1536,29 @@ const uiController = {
       document.getElementById('stat-throughput').textContent = '-- 回/h';
     }
 
-    // AMR detail
-    const detail = document.getElementById('stats-detail');
-    const overlay = document.getElementById('overlay-amr-stats');
+    // AMR詳細
     let detailHtml = '', overlayHtml = '';
     if (state.amrs.length > 0) {
       document.getElementById('overlay-stats').style.display = 'block';
       for (const amr of state.amrs) {
-        const avgCT = amr.taskCount > 0 ? (amr.totalCycleTime / amr.taskCount).toFixed(1) : '--';
+        const amrRecords = validRecords.filter(r => r.amrId === amr.id);
+        const avgCT = amrRecords.length > 0
+          ? (amrRecords.reduce((s, r) => s + r.totalCycleTime, 0) / amrRecords.length).toFixed(1)
+          : '--';
         const waitPct = t > 0 ? ((amr.totalWaitingTime / t) * 100).toFixed(1) : '0.0';
-        const line = `${amr.label}: ${amr.taskCount}回, 平均${avgCT}s, 待機${waitPct}%`;
+        const stateJa = {
+          at_home: '待機', moving_to_pickup: '→Pick', docking: 'Dock中',
+          moving_to_dropoff: '→Drop', releasing: 'Rel中', returning_home: '帰還中'
+        }[amr.state] || amr.state;
+        const line = `${amr.label}[${stateJa}]: ${amr.taskCount}回 / 平均${avgCT}s / 待機${waitPct}%`;
         detailHtml += `<div class="amr-stat">${line}</div>`;
-        overlayHtml += `<div class="os-row"><span class="os-label">${amr.label}</span><span class="os-value">${amr.taskCount}回 / ${avgCT}s / 待${waitPct}%</span></div>`;
+        overlayHtml += `<div class="os-row"><span class="os-label">${amr.label}</span><span class="os-value">${amr.taskCount}回 ${avgCT}s 待${waitPct}%</span></div>`;
       }
     } else {
       document.getElementById('overlay-stats').style.display = 'none';
     }
-    detail.innerHTML = detailHtml;
-    overlay.innerHTML = overlayHtml;
+    document.getElementById('stats-detail').innerHTML = detailHtml;
+    document.getElementById('overlay-amr-stats').innerHTML = overlayHtml;
   }
 };
 
@@ -1180,7 +1568,7 @@ const uiController = {
 let lastTimestamp = 0;
 function simLoop(timestamp) {
   if (!state.running) return;
-  const dtReal = Math.min((timestamp - lastTimestamp) / 1000, 0.1); // cap at 100ms
+  const dtReal = Math.min((timestamp - lastTimestamp) / 1000, 0.1);
   lastTimestamp = timestamp;
   const dtSim = dtReal * state.config.simSpeed;
   const fixedDt = 0.05;
