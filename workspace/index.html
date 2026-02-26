@@ -144,6 +144,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <div class="param-row"><label>ドッキング</label><div><input type="number" id="param-docking" value="30" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>リリース</label><div><input type="number" id="param-release" value="20" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>AMR台数</label><div><input type="number" id="param-amr-count" value="1" min="1" max="10" step="1"><span class="unit">台</span></div></div>
+      <div class="param-row"><label>Pickup供給周期</label><div><input type="number" id="param-pickup-interval" value="20" min="1" max="600" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>スケール</label><div><input type="number" id="param-scale" value="0.1" min="0.001" max="10" step="0.001"><span class="unit">m/px</span></div></div>
     </div>
 
@@ -216,6 +217,7 @@ const state = {
     dockingTime: 30,
     releaseTime: 20,
     amrCount: 1,
+    pickupSupplyInterval: 20,
     simSpeed: 1,
     ffSpeed: 3
   },
@@ -228,7 +230,8 @@ const state = {
   paused: false,
   totalDeliveries: 0,
   cycleRecords: [],
-  segmentReservation: new Map()
+  segmentReservation: new Map(),
+  pickupSupply: new Map()
 };
 
 // ============================================================
@@ -460,6 +463,11 @@ const graphManager = {
 // CORE - Pathfinder (Loop Trace)
 // ============================================================
 const pathfinder = {
+  _hasPickupCart(pickupId) {
+    const supply = state.pickupSupply.get(pickupId);
+    return !!supply && supply.availableCarts > 0;
+  },
+
   // ループ上の2方向探索
   // startId: ループ部のノードID, targetIds: 目的ノードID配列
   // returns: ノードID配列（パス）またはnull
@@ -559,7 +567,7 @@ const pathfinder = {
   // excludeIds: 他AMRが割り当て済みのPickupIDセット
   findNearestPickupOnLoop(startId, excludeIds) {
     const targets = [...state.nodes.values()]
-      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id))
+      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id) && this._hasPickupCart(n.id))
       .map(n => n.id);
     if (!targets.length) return null;
 
@@ -585,7 +593,7 @@ const pathfinder = {
   // Homeからのタスク探索
   findNearestPickupFromHome(homeId, excludeIds) {
     const targets = [...state.nodes.values()]
-      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id))
+      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id) && this._hasPickupCart(n.id))
       .map(n => n.id);
     if (!targets.length) return null;
     return this.findFromHome(homeId, targets);
@@ -630,12 +638,51 @@ const collisionManager = {
 // CORE - Simulation Engine
 // ============================================================
 const simEngine = {
+  _initPickupSupply() {
+    state.pickupSupply.clear();
+    const interval = Math.max(1, state.config.pickupSupplyInterval || 20);
+    const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
+    for (const pickup of pickups) {
+      state.pickupSupply.set(pickup.id, {
+        availableCarts: 1,
+        nextSupplyTime: interval
+      });
+    }
+  },
+
+  _refreshPickupSupply() {
+    const interval = Math.max(1, state.config.pickupSupplyInterval || 20);
+    for (const [pickupId, supply] of state.pickupSupply) {
+      if (!state.nodes.has(pickupId)) {
+        state.pickupSupply.delete(pickupId);
+        continue;
+      }
+      while (state.simTime >= supply.nextSupplyTime) {
+        if (supply.availableCarts < 1) supply.availableCarts = 1;
+        supply.nextSupplyTime += interval;
+      }
+    }
+  },
+
+  _hasCartAtPickup(pickupId) {
+    const supply = state.pickupSupply.get(pickupId);
+    return !!supply && supply.availableCarts > 0;
+  },
+
+  _consumePickupCart(pickupId) {
+    const supply = state.pickupSupply.get(pickupId);
+    if (!supply || supply.availableCarts <= 0) return false;
+    supply.availableCarts--;
+    return true;
+  },
+
   init() {
     state.amrs = [];
     state.simTime = 0;
     state.totalDeliveries = 0;
     state.cycleRecords = [];
     state.segmentReservation.clear();
+    this._initPickupSupply();
 
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
     const count = Math.min(state.config.amrCount, 10);
@@ -670,6 +717,7 @@ const simEngine = {
 
   update(dt) {
     state.simTime += dt;
+    this._refreshPickupSupply();
     for (const amr of state.amrs) {
       this._updateAMR(amr, dt);
     }
@@ -752,7 +800,7 @@ const simEngine = {
           this._onPickupArrival(amr);
         }
       } else {
-        // 全Pickupが占有中 → Homeへ退避
+        // 在庫ありのPickupが存在しない/割当不可 → Homeへ退避
         amr.assignedPickup = null;
         const homePath = pathfinder.findToHome(amr.currentNodeId);
         if (homePath) {
@@ -768,6 +816,21 @@ const simEngine = {
   },
 
   _onPickupArrival(amr) {
+    if (!this._hasCartAtPickup(amr.currentNodeId)) {
+      amr.assignedPickup = null;
+      const homePath = pathfinder.findToHome(amr.currentNodeId);
+      if (homePath) {
+        amr.state = 'returning_home';
+        amr.currentPath = homePath;
+        amr.pathIndex = 1;
+        if (homePath.length > 1) this._startSegment(amr);
+      } else {
+        amr.state = 'at_home';
+      }
+      return;
+    }
+    this._consumePickupCart(amr.currentNodeId);
+
     // サイクルタイム計測
     if (amr.cycleStartTime !== null) {
       const ct = state.simTime - amr.cycleStartTime;
@@ -1074,6 +1137,16 @@ const renderer = {
         ctx.strokeRect(n.x - 10, n.y - 10, 20, 20);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('P', n.x, n.y);
+        {
+          const carts = state.pickupSupply.get(n.id)?.availableCarts ?? 0;
+          ctx.beginPath();
+          ctx.arc(n.x + 11, n.y - 11, 6, 0, Math.PI * 2);
+          ctx.fillStyle = carts > 0 ? '#fde047' : '#64748b';
+          ctx.fill();
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 8px sans-serif';
+          ctx.fillText(String(carts), n.x + 11, n.y - 11);
+        }
         break;
       case 'dropoff':
         ctx.fillStyle = '#ef4444';
@@ -1450,6 +1523,10 @@ const uiController = {
     document.getElementById('param-docking').addEventListener('change', e => { state.config.dockingTime = parseFloat(e.target.value) || 30; });
     document.getElementById('param-release').addEventListener('change', e => { state.config.releaseTime = parseFloat(e.target.value) || 20; });
     document.getElementById('param-amr-count').addEventListener('change', e => { state.config.amrCount = Math.min(10, Math.max(1, parseInt(e.target.value) || 1)); });
+    document.getElementById('param-pickup-interval').addEventListener('change', e => {
+      state.config.pickupSupplyInterval = Math.max(1, parseFloat(e.target.value) || 20);
+      e.target.value = state.config.pickupSupplyInterval;
+    });
     document.getElementById('param-scale').addEventListener('change', e => {
       state.config.scale = parseFloat(e.target.value) || 0.1;
       graphManager.recalcDistances();
@@ -1565,6 +1642,7 @@ const uiController = {
     state.cycleRecords = [];
     state.amrs = [];
     state.segmentReservation.clear();
+    state.pickupSupply.clear();
     state.config.simSpeed = 1;
     state._lastSpeed = 1;
     const playBtn = document.getElementById('btn-play-pause');
@@ -1589,6 +1667,7 @@ const uiController = {
     document.getElementById('stat-time').textContent =
       `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
     document.getElementById('stat-deliveries').textContent = state.totalDeliveries + ' 回';
+    const pickupTotal = [...state.pickupSupply.values()].reduce((sum, s) => sum + s.availableCarts, 0);
 
     // サイクルレコードから平均を計算（初回サイクルは除く）
     const validRecords = state.cycleRecords;
@@ -1621,6 +1700,7 @@ const uiController = {
         detailHtml += `<div class="amr-stat">${line}</div>`;
         overlayHtml += `<div class="os-row"><span class="os-label">${amr.label}</span><span class="os-value">${amr.taskCount}回 ${avgCT}s 待${waitPct}%</span></div>`;
       }
+      detailHtml += `<div class="amr-stat">供給中の台車数: ${pickupTotal} 台</div>`;
     } else {
       document.getElementById('overlay-stats').style.display = 'none';
     }
