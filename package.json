@@ -1,0 +1,9 @@
+{
+  "name": "cycle-time-calculator",
+  "private": true,
+  "scripts": {
+    "check:syntax": "node scripts/check-syntax.js",
+    "test": "node --test tests/*.test.js",
+    "test:all": "npm run check:syntax && npm test"
+  }
+}
