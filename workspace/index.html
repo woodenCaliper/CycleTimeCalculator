@@ -674,7 +674,6 @@ const simEngine = {
 
 
   _handleSyncAreaBlocked(amr, dt, blockingArea) {
-    amr.totalWaitingTime += dt;
     amr.syncBlockTimer += dt;
 
     const isOutsideBlockingArea = blockingArea ? !pointInPolygon(amr.x, amr.y, blockingArea.points) : false;
@@ -905,6 +904,51 @@ const simEngine = {
     amr.waitTimer = 0;
   },
 
+  _recoverFromMovementStall(amr, nextState) {
+    if (amr.currentSegment) return;
+    collisionManager.releaseAll(amr.id);
+
+    if (nextState === 'docking') {
+      if (amr.assignedPickup && this._hasCartAtPickup(amr.assignedPickup)) {
+        const path = pathfinder.findLoopPath(amr.currentNodeId, [amr.assignedPickup]);
+        if (path && path.length > 1) {
+          amr.currentPath = path;
+          amr.pathIndex = 1;
+          this._startSegment(amr);
+          return;
+        }
+      }
+      amr.assignedPickup = null;
+      this._tryStartReturnHome(amr);
+      return;
+    }
+
+    if (nextState === 'releasing') {
+      if (amr.assignedDropoff) {
+        const path = pathfinder.findLoopPath(amr.currentNodeId, [amr.assignedDropoff]);
+        if (path && path.length > 1) {
+          amr.currentPath = path;
+          amr.pathIndex = 1;
+          this._startSegment(amr);
+        }
+      }
+      return;
+    }
+
+    if (nextState === 'at_home') {
+      this._tryStartReturnHome(amr);
+    }
+  },
+
+  _handleMovementStall(amr, dt, nextState) {
+    amr.totalWaitingTime += dt;
+    amr.waitDeadlockTimer += dt;
+    if (amr.waitDeadlockTimer >= 5) {
+      this._recoverFromMovementStall(amr, nextState);
+      amr.waitDeadlockTimer = 0;
+    }
+  },
+
   _handleMoving(amr, dt, nextState) {
     if (!amr.currentPath || amr.pathIndex >= amr.currentPath.length) {
       this._onPathComplete(amr, nextState);
@@ -920,8 +964,7 @@ const simEngine = {
       this._startSegment(amr);
       if (!amr.currentSegment) {
         // 待機中
-        amr.totalWaitingTime += dt;
-        amr.waitDeadlockTimer += dt;
+        this._handleMovementStall(amr, dt, nextState);
         return;
       }
     }
@@ -936,6 +979,7 @@ const simEngine = {
       const blockingArea = this._getBlockingSyncArea(amr, target.x, target.y);
       if (blockingArea) {
         this._handleSyncAreaBlocked(amr, dt, blockingArea);
+        this._handleMovementStall(amr, dt, nextState);
         return;
       }
       // ノード到着
@@ -960,6 +1004,7 @@ const simEngine = {
       const blockingArea = this._getBlockingSyncArea(amr, nx, ny);
       if (blockingArea) {
         this._handleSyncAreaBlocked(amr, dt, blockingArea);
+        this._handleMovementStall(amr, dt, nextState);
         return;
       }
       amr.x = nx;
