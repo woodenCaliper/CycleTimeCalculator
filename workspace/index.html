@@ -787,6 +787,21 @@ const simEngine = {
       collisionManager.release(amr.id, amr.currentSegment);
       amr.currentSegment = null;
     }
+
+    const currentAreas = this._syncAreasContainingPoint(amr.x, amr.y);
+    const canYieldToHome = amr.state === 'moving_to_pickup' && currentAreas.length > 0;
+    if (canYieldToHome && amr.syncBlockTimer >= 3) {
+      collisionManager.releaseAll(amr.id);
+      amr.currentSegment = null;
+      amr.currentPath = null;
+      amr.pathIndex = 0;
+      amr.assignedPickup = null;
+      amr.syncBlockTimer = 0;
+      this._tryStartReturnHome(amr);
+      return true;
+    }
+
+    return false;
   },
 
   _updateSyncAreaOccupancy(amr, x, y) {
@@ -1084,8 +1099,14 @@ const simEngine = {
     if (!amr.currentSegment) {
       this._startSegment(amr);
       if (!amr.currentSegment) {
-        // 待機中
-        this._handleMovementStall(amr, dt, nextState);
+        const blockingArea = this._getBlockingSyncArea(amr, target.x, target.y);
+        if (blockingArea) {
+          const yielded = this._handleSyncAreaBlocked(amr, dt, blockingArea);
+          if (!yielded) this._handleMovementStall(amr, dt, nextState);
+        } else {
+          // 待機中
+          this._handleMovementStall(amr, dt, nextState);
+        }
         return;
       }
     }
@@ -1098,8 +1119,8 @@ const simEngine = {
     if (moveState.reached) {
       const blockingArea = this._getBlockingSyncArea(amr, target.x, target.y);
       if (blockingArea) {
-        this._handleSyncAreaBlocked(amr, dt, blockingArea);
-        this._handleMovementStall(amr, dt, nextState);
+        const yielded = this._handleSyncAreaBlocked(amr, dt, blockingArea);
+        if (!yielded) this._handleMovementStall(amr, dt, nextState);
         return;
       }
       // ノード到着
@@ -1120,8 +1141,8 @@ const simEngine = {
     } else {
       const blockingArea = this._getBlockingSyncArea(amr, moveState.nextX, moveState.nextY);
       if (blockingArea) {
-        this._handleSyncAreaBlocked(amr, dt, blockingArea);
-        this._handleMovementStall(amr, dt, nextState);
+        const yielded = this._handleSyncAreaBlocked(amr, dt, blockingArea);
+        if (!yielded) this._handleMovementStall(amr, dt, nextState);
         return;
       }
       amr.x = moveState.nextX;

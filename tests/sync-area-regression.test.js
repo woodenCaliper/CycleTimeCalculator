@@ -203,3 +203,66 @@ test('simEngine.update updates AMRs inside SyncArea before outside entrants', ()
 
   assert.equal(result.outsideX > 160, true);
 });
+
+
+test('two SyncAreas around pickup and relay waypoint do not deadlock delivery flow', () => {
+  const context = loadAppContext();
+
+  const result = vm.runInContext(`(() => {
+    state.nodes.clear();
+    state.segments.clear();
+    state.adjacency.clear();
+    state.loopSegments.clear();
+    state.homeSegments.clear();
+    state.loopOrder = [];
+    state.syncAreas = [];
+    state.nodeCounter = 0;
+    state.segCounter = 0;
+    state.syncAreaCounter = 0;
+    state.segmentReservation.clear();
+
+    const pickup = graphManager.addNode('pickup', 100, 230, 'Pickup A');
+    const relay = graphManager.addNode('waypoint', 320, 210, 'Relay');
+    const dropoff = graphManager.addNode('dropoff', 540, 210, 'DropOff A');
+    graphManager.addLoopSegment(pickup.id, relay.id);
+    graphManager.addLoopSegment(relay.id, pickup.id);
+    graphManager.addLoopSegment(relay.id, dropoff.id);
+    graphManager.addLoopSegment(dropoff.id, relay.id);
+
+    const homes = [
+      graphManager.addNode('home', 220, 110, 'Home A'),
+      graphManager.addNode('home', 380, 90, 'Home B'),
+      graphManager.addNode('home', 280, 320, 'Home C'),
+      graphManager.addNode('home', 420, 320, 'Home D')
+    ];
+    homes.forEach(home => graphManager.addHomeSegment(relay.id, home.id));
+
+    state.syncAreas.push({
+      id: 'left',
+      points: [{ x: 35, y: 160 }, { x: 175, y: 160 }, { x: 190, y: 300 }, { x: 20, y: 300 }],
+      occupantAmrId: null
+    });
+    state.syncAreas.push({
+      id: 'center',
+      points: [{ x: 250, y: 170 }, { x: 400, y: 170 }, { x: 400, y: 260 }, { x: 250, y: 260 }],
+      occupantAmrId: null
+    });
+
+    state.config.amrCount = 4;
+    state.config.amrSpeed = 1;
+    state.config.scale = 0.1;
+    state.config.dockingTime = 30;
+    state.config.releaseTime = 20;
+    state.config.pickupSupplyInterval = 20;
+
+    simEngine.init();
+    for (let i = 0; i < 3000; i++) simEngine.update(0.1);
+
+    return {
+      deliveries: state.totalDeliveries,
+      amrStates: state.amrs.map(amr => amr.state)
+    };
+  })()`, context);
+
+  assert.equal(result.deliveries > 0, true);
+});
