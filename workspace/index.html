@@ -792,6 +792,27 @@ const simEngine = {
     }
   },
 
+  _refreshSyncAreaOccupancy() {
+    for (const area of state.syncAreas) {
+      if (area.points.length < 3) {
+        area.occupantAmrId = null;
+        continue;
+      }
+
+      const insideAmrs = state.amrs.filter(amr => pointInPolygon(amr.x, amr.y, area.points));
+      if (insideAmrs.length === 0) {
+        area.occupantAmrId = null;
+        continue;
+      }
+
+      if (area.occupantAmrId && insideAmrs.some(amr => amr.id === area.occupantAmrId)) {
+        continue;
+      }
+
+      area.occupantAmrId = insideAmrs[0].id;
+    }
+  },
+
   init() {
     state.amrs = [];
     state.simTime = 0;
@@ -809,6 +830,8 @@ const simEngine = {
       if (!home) continue;
       state.amrs.push(simulationLogic.createInitialAmr(home, i));
     }
+
+    this._refreshSyncAreaOccupancy();
   },
 
   update(dt) {
@@ -820,6 +843,7 @@ const simEngine = {
     for (const amr of state.amrs) {
       this._updateAMR(amr, dt);
     }
+    this._refreshSyncAreaOccupancy();
   },
 
   _updateAMR(amr, dt) {
