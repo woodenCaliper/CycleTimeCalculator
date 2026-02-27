@@ -224,7 +224,6 @@ const state = {
   paused: false,
   totalDeliveries: 0,
   cycleRecords: [],
-  segmentReservation: new Map(),
   pickupSupply: new Map()
 };
 
@@ -344,8 +343,7 @@ const simulationLogic = {
 };
 
 const renderLogic = {
-  getSegmentStyle({ isReserved, isLoop, isHome }) {
-    if (isReserved) return { dash: [], color: 'rgba(249,115,22,0.7)', width: 4 };
+  getSegmentStyle({ isLoop, isHome }) {
     if (isLoop) return { dash: [], color: 'rgba(74,222,128,0.7)', width: 2.5 };
     if (isHome) return { dash: [6, 4], color: 'rgba(96,165,250,0.7)', width: 2 };
     return { dash: [4, 4], color: 'rgba(150,150,150,0.5)', width: 1.5 };
@@ -452,7 +450,6 @@ const graphManager = {
     state.segments.delete(id);
     state.loopSegments.delete(id);
     state.homeSegments.delete(id);
-    state.segmentReservation.delete(id);
     this._rebuildLoopOrder();
   },
 
@@ -684,27 +681,6 @@ const pathfinder = {
 // ============================================================
 // CORE - Collision Manager
 // ============================================================
-const collisionManager = {
-  tryReserve(amrId, segId) {
-    const current = state.segmentReservation.get(segId);
-    if (!current || current === amrId) {
-      state.segmentReservation.set(segId, amrId);
-      return true;
-    }
-    return false;
-  },
-  release(amrId, segId) {
-    if (state.segmentReservation.get(segId) === amrId) {
-      state.segmentReservation.delete(segId);
-    }
-  },
-  releaseAll(amrId) {
-    for (const [sid, owner] of state.segmentReservation) {
-      if (owner === amrId) state.segmentReservation.delete(sid);
-    }
-  }
-};
-
 // ============================================================
 // CORE - Simulation Engine
 // ============================================================
@@ -783,7 +759,6 @@ const simEngine = {
 
     const isOutsideBlockingArea = blockingArea ? !pointInPolygon(amr.x, amr.y, blockingArea.points) : false;
     if (amr.currentSegment && isOutsideBlockingArea && amr.syncBlockTimer >= 0.5) {
-      collisionManager.release(amr.id, amr.currentSegment);
       amr.currentSegment = null;
     }
 
@@ -791,7 +766,6 @@ const simEngine = {
     const mutualSyncDeadlock = this._isMutualSyncBlock(amr, blockingArea);
     const canYieldToHome = amr.state === 'moving_to_pickup' && currentAreas.length > 0 && mutualSyncDeadlock;
     if (canYieldToHome && amr.syncBlockTimer >= 3) {
-      collisionManager.releaseAll(amr.id);
       amr.currentSegment = null;
       amr.currentPath = null;
       amr.pathIndex = 0;
@@ -843,7 +817,6 @@ const simEngine = {
     state.simTime = 0;
     state.totalDeliveries = 0;
     state.cycleRecords = [];
-    state.segmentReservation.clear();
     this._initPickupSupply();
     for (const area of state.syncAreas) area.occupantAmrId = null;
 
@@ -1043,7 +1016,6 @@ const simEngine = {
 
   _recoverFromMovementStall(amr, nextState) {
     if (amr.currentSegment) return;
-    collisionManager.releaseAll(amr.id);
 
     if (nextState === 'docking') {
       if (amr.assignedPickup && this._hasCartAtPickup(amr.assignedPickup)) {
@@ -1130,7 +1102,6 @@ const simEngine = {
       amr.syncBlockTimer = 0;
       this._updateSyncAreaOccupancy(amr, amr.x, amr.y);
       amr.currentNodeId = targetId;
-      collisionManager.release(amr.id, amr.currentSegment);
       amr.currentSegment = null;
       amr.pathIndex++;
 
@@ -1155,7 +1126,6 @@ const simEngine = {
   },
 
   _onPathComplete(amr, nextState) {
-    collisionManager.releaseAll(amr.id);
     amr.currentSegment = null;
     amr.currentPath = null;
 
@@ -1185,13 +1155,9 @@ const simEngine = {
       return;
     }
 
-    if (collisionManager.tryReserve(amr.id, seg.id)) {
-      amr.currentSegment = seg.id;
-      const target = state.nodes.get(toId);
-      if (target) amr.direction = Math.atan2(target.y - amr.y, target.x - amr.x);
-    } else {
-      amr.currentSegment = null;
-    }
+    amr.currentSegment = seg.id;
+    const target = state.nodes.get(toId);
+    if (target) amr.direction = Math.atan2(target.y - amr.y, target.x - amr.x);
   }
 };
 
@@ -1257,13 +1223,12 @@ const renderer = {
 
       const isLoop = state.loopSegments.has(seg.id);
       const isHome = state.homeSegments.has(seg.id);
-      const isReserved = state.segmentReservation.has(seg.id);
 
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
 
-      const segmentStyle = renderLogic.getSegmentStyle({ isReserved, isLoop, isHome });
+      const segmentStyle = renderLogic.getSegmentStyle({ isLoop, isHome });
       ctx.setLineDash(segmentStyle.dash);
       ctx.strokeStyle = segmentStyle.color;
       ctx.lineWidth = segmentStyle.width;
@@ -1931,7 +1896,6 @@ const uiController = {
     state.totalDeliveries = 0;
     state.cycleRecords = [];
     state.amrs = [];
-    state.segmentReservation.clear();
     state.pickupSupply.clear();
     for (const area of state.syncAreas) area.occupantAmrId = null;
     state.config.simSpeed = 1;

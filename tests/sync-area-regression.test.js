@@ -154,7 +154,6 @@ test('simEngine.update updates AMRs inside SyncArea before outside entrants', ()
     state.nodeCounter = 0;
     state.segCounter = 0;
     state.syncAreaCounter = 0;
-    state.segmentReservation.clear();
 
     const left = graphManager.addNode('waypoint', 160, 200, 'Left');
     const center = graphManager.addNode('waypoint', 200, 200, 'Center');
@@ -219,7 +218,6 @@ test('two SyncAreas around pickup and relay waypoint do not deadlock delivery fl
     state.nodeCounter = 0;
     state.segCounter = 0;
     state.syncAreaCounter = 0;
-    state.segmentReservation.clear();
 
     const pickup = graphManager.addNode('pickup', 100, 230, 'Pickup A');
     const relay = graphManager.addNode('waypoint', 320, 210, 'Relay');
@@ -282,7 +280,6 @@ test('blocked moving_to_pickup AMR does not yield home without mutual SyncArea d
     state.nodeCounter = 0;
     state.segCounter = 0;
     state.syncAreaCounter = 0;
-    state.segmentReservation.clear();
 
     const pickup = graphManager.addNode('pickup', 100, 200, 'Pickup');
     const relay = graphManager.addNode('waypoint', 300, 200, 'Relay');
