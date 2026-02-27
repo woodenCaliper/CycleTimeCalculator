@@ -89,7 +89,7 @@ Step 5: シミュレーション実行
 - ノードタイプ:
   - **Pickup Station**（緑色の四角アイコン）: 台車ドッキング地点
   - **DropOff Station**（赤色の四角アイコン）: 台車リリース地点
-  - **待機エリア / Home**（青色の丸アイコン）: AMR待機場所
+  - **待機エリア / Home**（青色の丸アイコン）: AMR待機場所（**1ノードあたり同時に1台のみ停止可**）
   - **Waypoint**（グレーの小丸）: 経路の中間点・折り返し点
 - 配置後、ドラッグで位置調整が可能
 - 右クリックで削除
@@ -114,6 +114,7 @@ Step 5: シミュレーション実行
 - Home枝にも同じ経路属性（双方向 / 片方向）を設定できる
 - 1つのノードから複数のHome接続を延ばすことも可能
 - Waiting Areaノード同士を直接接続することは不可
+- **待機エリア占有制約**: 同一Waiting Areaへ複数AMRを同時に帰還させない（帰還先は空き/予約なしのHomeから選択）
 
 - 各セグメント中点に距離（m）を表示
 - 双方向セグメントは従来通りの線表示、片方向セグメントは進行方向の矢印を重ねて表示
@@ -258,7 +259,7 @@ SyncArea = {
 | `moving_to_dropoff` | DropOff Stationへ移動中（ループ経路上を走行） | `releasing` |
 | `releasing` | DropOff Stationでリリース作業中 | `moving_to_pickup` |
 | `waiting` | 衝突回避による一時停止中 | （前の状態に復帰） |
-| `returning_home` | タスクなし時にHomeへ帰還中（例外的） | `at_home` |
+| `returning_home` | タスクなし時に空きHomeへ帰還中（例外的） | `at_home` |
 
 > **通常サイクル**: `moving_to_pickup` → `docking` → `moving_to_dropoff` → `releasing` → `moving_to_pickup` → ...
 >
@@ -279,7 +280,8 @@ SyncArea = {
   currentCycleStart: 0,       // 現在のサイクル開始時刻（Pickup到着時刻）
   waitTimer: 0,               // Station作業の残り時間
   assignedPickup: null,       // 割り当て済みPickup StationのノードID
-  assignedDropoff: null       // 割り当て済みDropOff StationのノードID
+  assignedDropoff: null,      // 割り当て済みDropOff StationのノードID
+  targetHomeId: null          // 帰還先として予約済みのWaiting AreaノードID（1台制約用）
 }
 ```
 
@@ -375,9 +377,11 @@ Pickup Station → （以降ループ）
           → 見つからなければ Home枝へ戻り "returning_home" へ遷移（例外）
 
       case "returning_home":
+        → 空き/未予約のWaiting Areaを探索して帰還経路を確定
+        → 空きが無い場合は帰還待機（空きが出た時点で再探索）
         → Home枝経路に沿って移動（衝突回避あり）
         → 進入先がSyncArea内で、他AMRが占有中なら境界外で待機
-        → Home到着 → "at_home" へ遷移
+        → Home到着 → "at_home" へ遷移（当該Homeを占有）
 
       case "waiting":
         → 衝突回避による一時停止中

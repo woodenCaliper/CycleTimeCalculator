@@ -522,8 +522,8 @@ const pathfinder = {
   },
 
   // ループ部ノードから最寄りHomeへのパス（ループ→Home枝）
-  findToHome(startId) {
-    const homes = [...state.nodes.values()].filter(n => n.type === 'home');
+  findToHome(startId, excludeHomeIds = new Set()) {
+    const homes = [...state.nodes.values()].filter(n => n.type === 'home' && !excludeHomeIds.has(n.id));
     if (!homes.length) return null;
 
     let bestPath = null, bestDist = Infinity;
@@ -706,7 +706,7 @@ const simEngine = {
     for (const area of state.syncAreas) area.occupantAmrId = null;
 
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
-    const count = Math.min(state.config.amrCount, 10);
+    const count = Math.min(state.config.amrCount, 10, homes.length);
 
     for (let i = 0; i < count; i++) {
       const home = homes[i % homes.length];
@@ -720,6 +720,7 @@ const simEngine = {
         y: home.y,
         currentNodeId: home.id,
         currentPath: null,
+        targetHomeId: home.id,
         pathIndex: 0,
         hasCargo: false,
         taskCount: 0,
@@ -755,7 +756,7 @@ const simEngine = {
       case 'docking':           this._handleDocking(amr, dt); break;
       case 'moving_to_dropoff': this._handleMoving(amr, dt, 'releasing'); break;
       case 'releasing':         this._handleReleasing(amr, dt); break;
-      case 'returning_home':    this._handleMoving(amr, dt, 'at_home'); break;
+      case 'returning_home':    this._handleReturningHome(amr, dt); break;
     }
     amr.blinkTimer += dt;
   },
@@ -768,11 +769,42 @@ const simEngine = {
     return assigned;
   },
 
+  _getReservedHomes(excludeAmrId = null) {
+    const reserved = new Set();
+    for (const amr of state.amrs) {
+      if (excludeAmrId && amr.id === excludeAmrId) continue;
+      if (amr.targetHomeId) reserved.add(amr.targetHomeId);
+      const node = state.nodes.get(amr.currentNodeId);
+      if (node && node.type === 'home' && amr.state === 'at_home') reserved.add(node.id);
+    }
+    return reserved;
+  },
+
+  _tryStartReturnHome(amr) {
+    const reservedHomes = this._getReservedHomes(amr.id);
+    const homePath = pathfinder.findToHome(amr.currentNodeId, reservedHomes);
+    if (!homePath || homePath.length === 0) {
+      amr.state = 'returning_home';
+      amr.currentPath = null;
+      amr.pathIndex = 0;
+      amr.targetHomeId = null;
+      return false;
+    }
+    const targetHomeId = homePath[homePath.length - 1];
+    amr.state = 'returning_home';
+    amr.currentPath = homePath;
+    amr.pathIndex = 1;
+    amr.targetHomeId = targetHomeId;
+    if (homePath.length > 1) this._startSegment(amr);
+    return true;
+  },
+
   _handleAtHome(amr) {
     const assignedPickups = this._getAssignedPickups();
     const path = pathfinder.findNearestPickupFromHome(amr.currentNodeId, assignedPickups);
     if (path) {
       amr.assignedPickup = path[path.length - 1];
+      amr.targetHomeId = null;
       amr.state = 'moving_to_pickup';
       amr.currentPath = path;
       amr.pathIndex = 1;
@@ -798,6 +830,16 @@ const simEngine = {
         amr.hasCargo = false;
       }
     }
+  },
+
+  _handleReturningHome(amr, dt) {
+    if (!amr.currentPath || amr.pathIndex >= amr.currentPath.length) {
+      if (!this._tryStartReturnHome(amr)) {
+        amr.totalWaitingTime += dt;
+        return;
+      }
+    }
+    this._handleMoving(amr, dt, 'at_home');
   },
 
   _handleReleasing(amr, dt) {
@@ -827,15 +869,7 @@ const simEngine = {
       } else {
         // 在庫ありのPickupが存在しない/割当不可 → Homeへ退避
         amr.assignedPickup = null;
-        const homePath = pathfinder.findToHome(amr.currentNodeId);
-        if (homePath) {
-          amr.state = 'returning_home';
-          amr.currentPath = homePath;
-          amr.pathIndex = 1;
-          if (homePath.length > 1) this._startSegment(amr);
-        } else {
-          amr.state = 'at_home';
-        }
+        this._tryStartReturnHome(amr);
       }
     }
   },
@@ -843,15 +877,7 @@ const simEngine = {
   _onPickupArrival(amr) {
     if (!this._hasCartAtPickup(amr.currentNodeId)) {
       amr.assignedPickup = null;
-      const homePath = pathfinder.findToHome(amr.currentNodeId);
-      if (homePath) {
-        amr.state = 'returning_home';
-        amr.currentPath = homePath;
-        amr.pathIndex = 1;
-        if (homePath.length > 1) this._startSegment(amr);
-      } else {
-        amr.state = 'at_home';
-      }
+      this._tryStartReturnHome(amr);
       return;
     }
     this._consumePickupCart(amr.currentNodeId);
@@ -952,6 +978,7 @@ const simEngine = {
     } else if (nextState === 'at_home') {
       amr.state = 'at_home';
       amr.assignedPickup = null;
+      amr.targetHomeId = amr.currentNodeId;
     }
   },
 
