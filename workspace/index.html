@@ -478,7 +478,7 @@ const pathfinder = {
     const queue = [startId];
 
     while (queue.length > 0) {
-      queue.sort((a, b) => (dist.get(a) || Infinity) - (dist.get(b) || Infinity));
+      queue.sort((a, b) => (dist.get(a) ?? Infinity) - (dist.get(b) ?? Infinity));
       const cur = queue.shift();
       if (!cur || visited.has(cur)) continue;
       visited.add(cur);
@@ -497,8 +497,8 @@ const pathfinder = {
         if (visited.has(nxt)) continue;
         const seg = graphManager.getSegmentBetween(cur, nxt);
         if (!seg || !graphManager.canTraverse(seg, cur, nxt)) continue;
-        const nd = (dist.get(cur) || Infinity) + seg.distance;
-        if (nd < (dist.get(nxt) || Infinity)) {
+        const nd = (dist.get(cur) ?? Infinity) + seg.distance;
+        if (nd < (dist.get(nxt) ?? Infinity)) {
           dist.set(nxt, nd);
           prev.set(nxt, cur);
           queue.push(nxt);
