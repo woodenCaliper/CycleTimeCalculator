@@ -123,7 +123,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <button class="tool-btn" data-tool="dropoff" data-tooltip="DropOff"><span class="tool-icon" style="color:#ef4444">■</span><span class="tool-label">DropOff Station</span></button>
       <button class="tool-btn" data-tool="home" data-tooltip="Home"><span class="tool-icon" style="color:#3b82f6">●</span><span class="tool-label">待機エリア</span></button>
       <button class="tool-btn" data-tool="waypoint" data-tooltip="Waypoint"><span class="tool-icon" style="color:#9ca3af">●</span><span class="tool-label">Waypoint</span></button>
-      <button class="tool-btn" data-tool="loop-path" data-tooltip="ループ経路作成"><span class="tool-icon" style="color:#4ade80">/</span><span class="tool-label">ループ経路作成</span></button>
+      <button class="tool-btn" data-tool="loop-path" data-tooltip="経路作成"><span class="tool-icon" style="color:#4ade80">/</span><span class="tool-label">経路作成</span></button>
       <button class="tool-btn" data-tool="home-branch" data-tooltip="Home枝接続"><span class="tool-icon" style="color:#60a5fa">⎇</span><span class="tool-label">Home枝接続</span></button>
       <button class="tool-btn" data-tool="sync-area" data-tooltip="SyncArea作成"><span class="tool-icon" style="color:#facc15">⬠</span><span class="tool-label">SyncArea作成</span></button>
       <button class="tool-btn" data-tool="delete" data-tooltip="削除"><span class="tool-icon">🗑</span><span class="tool-label">削除</span></button>
@@ -292,23 +292,14 @@ const graphManager = {
     this._rebuildLoopOrder();
   },
 
-  // ループセグメントを追加
+  // 経路セグメントを追加（自由接続）
   addLoopSegment(fromId, toId) {
     if (fromId === toId) return { ok: false, msg: '同一ノードには接続できません' };
     const nf = state.nodes.get(fromId), nt = state.nodes.get(toId);
     if (!nf || !nt) return { ok: false, msg: 'ノードが見つかりません' };
 
-    // 型チェック
-    const loopTypes = ['pickup', 'dropoff', 'waypoint'];
-    if (!loopTypes.includes(nf.type)) return { ok: false, msg: `${nf.label} はループ部に配置できません（Homeノードはループ外）` };
-    if (!loopTypes.includes(nt.type)) return { ok: false, msg: `${nt.label} はループ部に配置できません（Homeノードはループ外）` };
-
     // 重複チェック
     if (this.getSegmentBetween(fromId, toId)) return { ok: false, msg: 'すでにセグメントが存在します' };
-
-    // ループ内次数チェック
-    if (this.getLoopDegree(fromId) >= 2) return { ok: false, msg: `${nf.label} にはすでに2本のループセグメントがあります（分岐不可）` };
-    if (this.getLoopDegree(toId) >= 2) return { ok: false, msg: `${nt.label} にはすでに2本のループセグメントがあります（分岐不可）` };
 
     const seg = this._createSegment(fromId, toId, state.segmentDirectionMode);
     state.loopSegments.add(seg.id);
@@ -383,17 +374,9 @@ const graphManager = {
     return deg;
   },
 
-  // ループが完成しているか
+  // 経路が1本以上あるか
   isLoopComplete() {
-    const loopNodes = this._getLoopNodes();
-    if (loopNodes.size < 2) return false;
-    // 最小ループ: 2ノード1セグメント
-    if (loopNodes.size === 2 && state.loopSegments.size === 1) return true;
-    // 閉ループ: 全ループノードが次数2
-    for (const nid of loopNodes) {
-      if (this.getLoopDegree(nid) !== 2) return false;
-    }
-    return loopNodes.size >= 3;
+    return state.loopSegments.size > 0;
   },
 
   _getLoopNodes() {
@@ -483,65 +466,46 @@ const pathfinder = {
     return !!supply && supply.availableCarts > 0;
   },
 
-  // ループ上の2方向探索
-  // startId: ループ部のノードID, targetIds: 目的ノードID配列
-  // returns: ノードID配列（パス）またはnull
+  // 任意グラフ上の最短経路探索（Dijkstra）
   findLoopPath(startId, targetIds) {
-    const { loopOrder } = state;
-    if (!loopOrder.length) return null;
-    const startIdx = loopOrder.indexOf(startId);
-    if (startIdx === -1) return null;
-    const N = loopOrder.length;
+    if (!state.nodes.has(startId)) return null;
     const targets = new Set(targetIds);
     if (targets.has(startId)) return [startId];
 
-    // 最小ループ (2ノード)
-    if (N === 2) {
-      const other = loopOrder[1 - startIdx];
-      if (targets.has(other)) return [startId, other];
-      return null;
-    }
+    const dist = new Map([[startId, 0]]);
+    const prev = new Map();
+    const visited = new Set();
+    const queue = [startId];
 
-    // CW探索
-    let cwDist = 0, cwPath = null;
-    {
-      const path = [startId];
-      for (let i = 1; i < N; i++) {
-        const nodeId = loopOrder[(startIdx + i) % N];
-        const prevId = loopOrder[(startIdx + i - 1) % N];
-        const seg = graphManager.getSegmentBetween(prevId, nodeId);
-        if (!seg || !graphManager.canTraverse(seg, prevId, nodeId)) {
-          cwDist = Infinity;
-          break;
+    while (queue.length > 0) {
+      queue.sort((a, b) => (dist.get(a) || Infinity) - (dist.get(b) || Infinity));
+      const cur = queue.shift();
+      if (!cur || visited.has(cur)) continue;
+      visited.add(cur);
+      if (targets.has(cur)) {
+        const path = [];
+        let node = cur;
+        while (node) {
+          path.push(node);
+          node = prev.get(node);
         }
-        cwDist += seg.distance;
-        path.push(nodeId);
-        if (targets.has(nodeId)) { cwPath = [...path]; break; }
+        return path.reverse();
+      }
+
+      const neighbors = [...(state.adjacency.get(cur) || [])];
+      for (const nxt of neighbors) {
+        if (visited.has(nxt)) continue;
+        const seg = graphManager.getSegmentBetween(cur, nxt);
+        if (!seg || !graphManager.canTraverse(seg, cur, nxt)) continue;
+        const nd = (dist.get(cur) || Infinity) + seg.distance;
+        if (nd < (dist.get(nxt) || Infinity)) {
+          dist.set(nxt, nd);
+          prev.set(nxt, cur);
+          queue.push(nxt);
+        }
       }
     }
-
-    // CCW探索
-    let ccwDist = 0, ccwPath = null;
-    {
-      const path = [startId];
-      for (let i = 1; i < N; i++) {
-        const nodeId = loopOrder[(startIdx - i + N) % N];
-        const nextId = loopOrder[(startIdx - i + 1 + N) % N];
-        const seg = graphManager.getSegmentBetween(nextId, nodeId);
-        if (!seg || !graphManager.canTraverse(seg, nextId, nodeId)) {
-          ccwDist = Infinity;
-          break;
-        }
-        ccwDist += seg.distance;
-        path.push(nodeId);
-        if (targets.has(nodeId)) { ccwPath = [...path]; break; }
-      }
-    }
-
-    if (!cwPath && !ccwPath) return null;
-    if (!cwPath) return ccwPath;
-    if (!ccwPath) return cwPath;
-    return cwDist <= ccwDist ? cwPath : ccwPath;
+    return null;
   },
 
   // Homeノードから目的ノードへのパス（Home枝→ループ→target）
@@ -1440,12 +1404,6 @@ const inputHandler = {
     const node = graphManager.findNearNode(pos.x, pos.y);
     if (!node) return;
 
-    // Homeノードはブロック
-    if (node.type === 'home') {
-      showNotif('Homeノードはループ部に配置できません', 'error');
-      return;
-    }
-
     if (this.loopPathNodes.length === 0) {
       // 始点として選択
       this.loopPathNodes = [node.id];
@@ -1457,17 +1415,11 @@ const inputHandler = {
     const startId = this.loopPathNodes[0];
     const lastId = this.loopPathNodes[this.loopPathNodes.length - 1];
 
-    // 始点をクリック → ループ閉じる（3ノード以上）
+    // 始点をクリック → 経路確定（閉路でなくても可）
     if (node.id === startId && this.loopPathNodes.length >= 2) {
-      const result = graphManager.addLoopSegment(lastId, startId);
-      if (!result.ok) {
-        showNotif(result.msg, 'error');
-        return;
-      }
-      this.loopPathSegIds.push(result.seg.id);
       this.loopPathNodes = [];
       this.loopPathSegIds = [];
-      showNotif('ループが完成しました！', 'success');
+      showNotif('経路作成を確定しました', 'success');
       renderer.render();
       return;
     }
@@ -1484,24 +1436,11 @@ const inputHandler = {
     this.loopPathSegIds.push(result.seg.id);
     this.loopPathNodes.push(node.id);
 
-    // ループ完成チェック（最小ループ A↔B）
-    if (graphManager.isLoopComplete()) {
-      this.loopPathNodes = [];
-      this.loopPathSegIds = [];
-      showNotif('最小ループ（A↔B）が完成しました！', 'success');
-    } else {
-      const isStart = this.loopPathNodes.length > 1 &&
-        graphManager.getSegmentBetween(node.id, startId) !== null;
-      showNotif(`${node.label} を追加。始点をクリックでループ閉じる（現在${this.loopPathNodes.length}ノード）`, 'info');
-    }
+    showNotif(`${node.label} を追加。継続してノード追加、または始点クリックで確定（現在${this.loopPathNodes.length}ノード）`, 'info');
     renderer.render();
   },
 
   _handleHomeBranchClick(pos) {
-    if (!graphManager.isLoopComplete()) {
-      showNotif('ループ部を先に完成させてください', 'error');
-      return;
-    }
     const node = graphManager.findNearNode(pos.x, pos.y);
     if (!node) return;
 
@@ -1697,8 +1636,8 @@ const uiController = {
   },
 
   _validateForSim() {
-    if (!graphManager.isLoopComplete()) {
-      showNotif('ループ経路が未完成です。ループ経路作成ツールでループを作成してください', 'error');
+    if (state.segments.size === 0) {
+      showNotif('経路がありません。経路作成ツールでセグメントを追加してください', 'error');
       return false;
     }
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
