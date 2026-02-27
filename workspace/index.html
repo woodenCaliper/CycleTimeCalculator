@@ -262,6 +262,103 @@ function pointInPolygon(x, y, points) {
 }
 
 // ============================================================
+// LOGIC - Testable Pure Functions
+// ============================================================
+const simulationLogic = {
+  createInitialAmr(home, index) {
+    return {
+      id: 'amr_' + (index + 1),
+      label: 'AMR-' + (index + 1),
+      state: 'at_home',
+      currentSegment: null,
+      x: home.x,
+      y: home.y,
+      currentNodeId: home.id,
+      currentPath: null,
+      targetHomeId: home.id,
+      pathIndex: 0,
+      hasCargo: false,
+      taskCount: 0,
+      totalCycleTime: 0,
+      cycleStartTime: null,
+      waitTimer: 0,
+      totalWaitingTime: 0,
+      waitDeadlockTimer: 0,
+      syncBlockTimer: 0,
+      assignedPickup: null,
+      assignedDropoff: null,
+      direction: 0,
+      blinkTimer: 0
+    };
+  },
+
+  calculateMoveState(amr, target, movePx) {
+    const dx = target.x - amr.x;
+    const dy = target.y - amr.y;
+    const distToTarget = Math.hypot(dx, dy);
+    if (distToTarget <= movePx) {
+      return { reached: true, nextX: target.x, nextY: target.y, direction: amr.direction, dx, dy, distToTarget };
+    }
+    const ratio = movePx / distToTarget;
+    return {
+      reached: false,
+      nextX: amr.x + dx * ratio,
+      nextY: amr.y + dy * ratio,
+      direction: Math.atan2(dy, dx),
+      dx,
+      dy,
+      distToTarget
+    };
+  },
+
+  formatTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  },
+
+  calculateSummaryStats(simTime, totalDeliveries, cycleRecords) {
+    if (cycleRecords.length === 0) {
+      return { avgCtText: '-- 秒', throughputText: '-- 回/h' };
+    }
+    const totalCt = cycleRecords.reduce((sum, r) => sum + r.totalCycleTime, 0);
+    const avgCt = totalCt / cycleRecords.length;
+    const throughput = simTime > 0 ? (totalDeliveries / simTime) * 3600 : 0;
+    return {
+      avgCtText: `${avgCt.toFixed(1)} 秒`,
+      throughputText: `${throughput.toFixed(1)} 回/h`
+    };
+  },
+
+  getAmrStateLabel(stateKey) {
+    return {
+      at_home: '待機',
+      moving_to_pickup: '→Pick',
+      docking: 'Dock中',
+      moving_to_dropoff: '→Drop',
+      releasing: 'Rel中',
+      returning_home: '帰還中'
+    }[stateKey] || stateKey;
+  }
+};
+
+const renderLogic = {
+  getSegmentStyle({ isReserved, isLoop, isHome }) {
+    if (isReserved) return { dash: [], color: 'rgba(249,115,22,0.7)', width: 4 };
+    if (isLoop) return { dash: [], color: 'rgba(74,222,128,0.7)', width: 2.5 };
+    if (isHome) return { dash: [6, 4], color: 'rgba(96,165,250,0.7)', width: 2 };
+    return { dash: [4, 4], color: 'rgba(150,150,150,0.5)', width: 1.5 };
+  },
+
+  getSyncAreaStyle(occupied) {
+    return occupied
+      ? { fill: 'rgba(250,204,21,0.22)', stroke: '#f59e0b', label: '使用中' }
+      : { fill: 'rgba(250,204,21,0.12)', stroke: '#facc15', label: '空き' };
+  }
+};
+
+// ============================================================
 // CORE - Graph Manager
 // ============================================================
 const graphManager = {
@@ -710,30 +807,7 @@ const simEngine = {
     for (let i = 0; i < count; i++) {
       const home = homes[i % homes.length];
       if (!home) continue;
-      state.amrs.push({
-        id: 'amr_' + (i + 1),
-        label: 'AMR-' + (i + 1),
-        state: 'at_home',
-        currentSegment: null,
-        x: home.x,
-        y: home.y,
-        currentNodeId: home.id,
-        currentPath: null,
-        targetHomeId: home.id,
-        pathIndex: 0,
-        hasCargo: false,
-        taskCount: 0,
-        totalCycleTime: 0,
-        cycleStartTime: null,     // Pickup到着時刻
-        waitTimer: 0,
-        totalWaitingTime: 0,
-        waitDeadlockTimer: 0,
-        syncBlockTimer: 0,
-        assignedPickup: null,
-        assignedDropoff: null,
-        direction: 0,
-        blinkTimer: 0
-      });
+      state.amrs.push(simulationLogic.createInitialAmr(home, i));
     }
   },
 
@@ -972,10 +1046,9 @@ const simEngine = {
 
     const speed = state.config.amrSpeed;
     const movePx = (speed * dt) / state.config.scale;
-    const dx = target.x - amr.x, dy = target.y - amr.y;
-    const distToTarget = Math.hypot(dx, dy);
+    const moveState = simulationLogic.calculateMoveState(amr, target, movePx);
 
-    if (distToTarget <= movePx) {
+    if (moveState.reached) {
       const blockingArea = this._getBlockingSyncArea(amr, target.x, target.y);
       if (blockingArea) {
         this._handleSyncAreaBlocked(amr, dt, blockingArea);
@@ -998,20 +1071,17 @@ const simEngine = {
         this._startSegment(amr);
       }
     } else {
-      const ratio = movePx / distToTarget;
-      const nx = amr.x + dx * ratio;
-      const ny = amr.y + dy * ratio;
-      const blockingArea = this._getBlockingSyncArea(amr, nx, ny);
+      const blockingArea = this._getBlockingSyncArea(amr, moveState.nextX, moveState.nextY);
       if (blockingArea) {
         this._handleSyncAreaBlocked(amr, dt, blockingArea);
         this._handleMovementStall(amr, dt, nextState);
         return;
       }
-      amr.x = nx;
-      amr.y = ny;
+      amr.x = moveState.nextX;
+      amr.y = moveState.nextY;
       amr.syncBlockTimer = 0;
       this._updateSyncAreaOccupancy(amr, amr.x, amr.y);
-      amr.direction = Math.atan2(dy, dx);
+      amr.direction = moveState.direction;
     }
   },
 
@@ -1091,13 +1161,14 @@ const renderer = {
     // セグメント描画
     for (const area of state.syncAreas) {
       if (area.points.length < 3) continue;
+      const areaStyle = renderLogic.getSyncAreaStyle(!!area.occupantAmrId);
       ctx.beginPath();
       ctx.moveTo(area.points[0].x, area.points[0].y);
       for (let i = 1; i < area.points.length; i++) ctx.lineTo(area.points[i].x, area.points[i].y);
       ctx.closePath();
-      ctx.fillStyle = area.occupantAmrId ? 'rgba(250,204,21,0.22)' : 'rgba(250,204,21,0.12)';
+      ctx.fillStyle = areaStyle.fill;
       ctx.fill();
-      ctx.strokeStyle = area.occupantAmrId ? '#f59e0b' : '#facc15';
+      ctx.strokeStyle = areaStyle.stroke;
       ctx.lineWidth = 2;
       ctx.setLineDash([8, 4]);
       ctx.stroke();
@@ -1108,7 +1179,7 @@ const renderer = {
       ctx.fillStyle = '#fde68a';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`SyncArea (${area.occupantAmrId ? '使用中' : '空き'})`, cx, cy);
+      ctx.fillText(`SyncArea (${areaStyle.label})`, cx, cy);
     }
 
     for (const seg of state.segments.values()) {
@@ -1123,23 +1194,10 @@ const renderer = {
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
 
-      if (isReserved) {
-        ctx.setLineDash([]);
-        ctx.strokeStyle = 'rgba(249,115,22,0.7)';
-        ctx.lineWidth = 4;
-      } else if (isLoop) {
-        ctx.setLineDash([]);
-        ctx.strokeStyle = 'rgba(74,222,128,0.7)';
-        ctx.lineWidth = 2.5;
-      } else if (isHome) {
-        ctx.setLineDash([6, 4]);
-        ctx.strokeStyle = 'rgba(96,165,250,0.7)';
-        ctx.lineWidth = 2;
-      } else {
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = 'rgba(150,150,150,0.5)';
-        ctx.lineWidth = 1.5;
-      }
+      const segmentStyle = renderLogic.getSegmentStyle({ isReserved, isLoop, isHome });
+      ctx.setLineDash(segmentStyle.dash);
+      ctx.strokeStyle = segmentStyle.color;
+      ctx.lineWidth = segmentStyle.width;
       ctx.stroke();
       ctx.setLineDash([]);
 
@@ -1836,41 +1894,25 @@ const uiController = {
 
   updateStats() {
     const t = state.simTime;
-    const h = Math.floor(t / 3600);
-    const m = Math.floor((t % 3600) / 60);
-    const s = Math.floor(t % 60);
-    document.getElementById('stat-time').textContent =
-      `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    document.getElementById('stat-time').textContent = simulationLogic.formatTime(t);
     document.getElementById('stat-deliveries').textContent = state.totalDeliveries + ' 回';
-    const pickupTotal = [...state.pickupSupply.values()].reduce((sum, s) => sum + s.availableCarts, 0);
+    const pickupTotal = [...state.pickupSupply.values()].reduce((sum, supply) => sum + supply.availableCarts, 0);
 
-    // サイクルレコードから平均を計算（初回サイクルは除く）
     const validRecords = state.cycleRecords;
-    if (validRecords.length > 0) {
-      const totalCT = validRecords.reduce((sum, r) => sum + r.totalCycleTime, 0);
-      const avgCT = totalCT / validRecords.length;
-      document.getElementById('stat-avg-ct').textContent = avgCT.toFixed(1) + ' 秒';
-      const tp = t > 0 ? (state.totalDeliveries / t) * 3600 : 0;
-      document.getElementById('stat-throughput').textContent = tp.toFixed(1) + ' 回/h';
-    } else {
-      document.getElementById('stat-avg-ct').textContent = '-- 秒';
-      document.getElementById('stat-throughput').textContent = '-- 回/h';
-    }
+    const summaryStats = simulationLogic.calculateSummaryStats(t, state.totalDeliveries, validRecords);
+    document.getElementById('stat-avg-ct').textContent = summaryStats.avgCtText;
+    document.getElementById('stat-throughput').textContent = summaryStats.throughputText;
 
-    // AMR詳細
     let detailHtml = '', overlayHtml = '';
     if (state.amrs.length > 0) {
       document.getElementById('overlay-stats').style.display = 'block';
       for (const amr of state.amrs) {
         const amrRecords = validRecords.filter(r => r.amrId === amr.id);
         const avgCT = amrRecords.length > 0
-          ? (amrRecords.reduce((s, r) => s + r.totalCycleTime, 0) / amrRecords.length).toFixed(1)
+          ? (amrRecords.reduce((sum, r) => sum + r.totalCycleTime, 0) / amrRecords.length).toFixed(1)
           : '--';
         const waitPct = t > 0 ? ((amr.totalWaitingTime / t) * 100).toFixed(1) : '0.0';
-        const stateJa = {
-          at_home: '待機', moving_to_pickup: '→Pick', docking: 'Dock中',
-          moving_to_dropoff: '→Drop', releasing: 'Rel中', returning_home: '帰還中'
-        }[amr.state] || amr.state;
+        const stateJa = simulationLogic.getAmrStateLabel(amr.state);
         const line = `${amr.label}[${stateJa}]: ${amr.taskCount}回 / 平均${avgCT}s / 待機${waitPct}%`;
         detailHtml += `<div class="amr-stat">${line}</div>`;
         overlayHtml += `<div class="os-row"><span class="os-label">${amr.label}</span><span class="os-value">${amr.taskCount}回 ${avgCT}s 待${waitPct}%</span></div>`;
@@ -1912,6 +1954,11 @@ renderer.resize();
 renderer.render();
 inputHandler.init();
 uiController.init();
+
+window.__testHooks = {
+  simulationLogic,
+  renderLogic
+};
 </script>
 </body>
 </html>
