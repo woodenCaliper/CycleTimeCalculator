@@ -138,3 +138,68 @@ test('pointInPolygon treats boundary points as inside SyncArea', () => {
 
   assert.equal(onEdge, true);
 });
+
+
+test('simEngine.update updates AMRs inside SyncArea before outside entrants', () => {
+  const context = loadAppContext();
+
+  const result = vm.runInContext(`(() => {
+    state.nodes.clear();
+    state.segments.clear();
+    state.adjacency.clear();
+    state.loopSegments.clear();
+    state.homeSegments.clear();
+    state.loopOrder = [];
+    state.syncAreas = [];
+    state.nodeCounter = 0;
+    state.segCounter = 0;
+    state.syncAreaCounter = 0;
+    state.segmentReservation.clear();
+
+    const left = graphManager.addNode('waypoint', 160, 200, 'Left');
+    const center = graphManager.addNode('waypoint', 200, 200, 'Center');
+    const right = graphManager.addNode('waypoint', 260, 200, 'Right');
+    graphManager.addLoopSegment(left.id, center.id);
+    graphManager.addLoopSegment(center.id, left.id);
+    graphManager.addLoopSegment(center.id, right.id);
+    graphManager.addLoopSegment(right.id, center.id);
+
+    state.syncAreas.push({
+      id: 'sa1',
+      points: [{ x: 170, y: 170 }, { x: 230, y: 170 }, { x: 230, y: 230 }, { x: 170, y: 230 }],
+      occupantAmrId: 'amr_1'
+    });
+
+    const amrInside = simulationLogic.createInitialAmr(center, 0);
+    amrInside.id = 'amr_1';
+    amrInside.state = 'moving_to_dropoff';
+    amrInside.currentNodeId = center.id;
+    amrInside.currentPath = [center.id, right.id];
+    amrInside.pathIndex = 1;
+    amrInside.x = 200;
+    amrInside.y = 200;
+
+    const amrOutside = simulationLogic.createInitialAmr(left, 1);
+    amrOutside.id = 'amr_2';
+    amrOutside.state = 'moving_to_dropoff';
+    amrOutside.currentNodeId = left.id;
+    amrOutside.currentPath = [left.id, center.id];
+    amrOutside.pathIndex = 1;
+    amrOutside.x = 160;
+    amrOutside.y = 200;
+
+    state.amrs = [amrOutside, amrInside];
+    state.config.amrSpeed = 1;
+    state.config.scale = 0.1;
+
+    simEngine.update(4);
+
+    return {
+      outsideX: state.amrs[0].x,
+      outsideState: state.amrs[0].state,
+      occupant: state.syncAreas[0].occupantAmrId
+    };
+  })()`, context);
+
+  assert.equal(result.outsideX > 160, true);
+});

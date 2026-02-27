@@ -843,15 +843,29 @@ const simEngine = {
     this._refreshSyncAreaOccupancy();
   },
 
+  _isAmrInsideSyncArea(amr) {
+    return state.syncAreas.some(area => area.points.length >= 3 && pointInPolygon(amr.x, amr.y, area.points));
+  },
+
   update(dt) {
     state.simTime += dt;
     this._refreshPickupSupply();
     for (const area of state.syncAreas) {
       if (area.occupantAmrId && !state.amrs.some(a => a.id === area.occupantAmrId)) area.occupantAmrId = null;
     }
+
+    const insideSync = [];
+    const outsideSync = [];
     for (const amr of state.amrs) {
-      this._updateAMR(amr, dt);
+      if (this._isAmrInsideSyncArea(amr)) {
+        insideSync.push(amr);
+      } else {
+        outsideSync.push(amr);
+      }
     }
+
+    for (const amr of insideSync) this._updateAMR(amr, dt);
+    for (const amr of outsideSync) this._updateAMR(amr, dt);
     this._refreshSyncAreaOccupancy();
   },
 
