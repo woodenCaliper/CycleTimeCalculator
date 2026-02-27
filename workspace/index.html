@@ -764,7 +764,11 @@ const simEngine = {
   _getAssignedPickups() {
     const assigned = new Set();
     for (const amr of state.amrs) {
-      if (amr.assignedPickup) assigned.add(amr.assignedPickup);
+      // Pickupの重複割当は「Pickupへ向かっている最中」のAMRのみを対象にする。
+      // ドッキング開始後（在庫消費後）やDropOff搬送中は予約解除扱いとする。
+      if (amr.state === 'moving_to_pickup' && amr.assignedPickup) {
+        assigned.add(amr.assignedPickup);
+      }
     }
     return assigned;
   },
@@ -881,6 +885,7 @@ const simEngine = {
       return;
     }
     this._consumePickupCart(amr.currentNodeId);
+    amr.assignedPickup = null;
 
     // サイクルタイム計測
     if (amr.cycleStartTime !== null) {

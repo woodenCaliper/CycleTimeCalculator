@@ -264,6 +264,7 @@ SyncArea = {
 > **通常サイクル**: `moving_to_pickup` → `docking` → `moving_to_dropoff` → `releasing` → `moving_to_pickup` → ...
 >
 > **Home帰還条件**: すべてのPickupが「在庫なし or 他AMR割当済み」の場合、または到着Pickupの在庫が0だった場合
+> **Pickup割当ルール**: 他AMRの割当として扱うのは `moving_to_pickup` 中のみ。`docking` / `moving_to_dropoff` / `releasing` 中は次Pickupの割当をブロックしない。
 
 ```javascript
 {
@@ -279,7 +280,7 @@ SyncArea = {
   totalCycleTime: 0,          // 累積サイクルタイム（平均計算用）
   currentCycleStart: 0,       // 現在のサイクル開始時刻（Pickup到着時刻）
   waitTimer: 0,               // Station作業の残り時間
-  assignedPickup: null,       // 割り当て済みPickup StationのノードID
+  assignedPickup: null,       // 割り当て済みPickup StationのノードID（moving_to_pickup中のみ有効）
   assignedDropoff: null,      // 割り当て済みDropOff StationのノードID
   targetHomeId: null          // 帰還先として予約済みのWaiting AreaノードID（1台制約用）
 }
