@@ -250,6 +250,15 @@ function pointToSegmentDist(px, py, ax, ay, bx, by) {
 }
 
 function pointInPolygon(x, y, points) {
+  const edgeEpsilon = 0.5;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x, yi = points[i].y;
+    const xj = points[j].x, yj = points[j].y;
+    if (pointToSegmentDist(x, y, xi, yi, xj, yj) <= edgeEpsilon) {
+      return true;
+    }
+  }
+
   let inside = false;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
     const xi = points[i].x, yi = points[i].y;

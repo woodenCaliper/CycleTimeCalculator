@@ -126,3 +126,15 @@ test('simEngine.init marks SyncArea occupied when AMR starts inside area', () =>
 
   assert.equal(result.occupantAmrId, result.amrId);
 });
+
+
+test('pointInPolygon treats boundary points as inside SyncArea', () => {
+  const context = loadAppContext();
+
+  const onEdge = vm.runInContext(`(() => {
+    const poly = [{ x: 250, y: 150 }, { x: 350, y: 150 }, { x: 350, y: 250 }, { x: 250, y: 250 }];
+    return pointInPolygon(300, 150, poly);
+  })()`, context);
+
+  assert.equal(onEdge, true);
+});
