@@ -44,6 +44,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .param-row label { font-size: 12px; color: #aaa; }
 .param-row input[type="number"] { width: 70px; background: #0f3460; border: 1px solid #1a4a8a; color: #fff; padding: 3px 6px; border-radius: 3px; font-size: 12px; text-align: right; }
 .param-row .unit { font-size: 11px; color: #888; margin-left: 4px; min-width: 30px; }
+.param-row select { width: 150px; background: #0f3460; border: 1px solid #1a4a8a; color: #fff; padding: 4px 6px; border-radius: 3px; font-size: 12px; }
 
 /* ===== Simulation Controls ===== */
 .sim-controls { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
@@ -122,10 +123,19 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <button class="tool-btn" data-tool="dropoff" data-tooltip="DropOff"><span class="tool-icon" style="color:#ef4444">■</span><span class="tool-label">DropOff Station</span></button>
       <button class="tool-btn" data-tool="home" data-tooltip="Home"><span class="tool-icon" style="color:#3b82f6">●</span><span class="tool-label">待機エリア</span></button>
       <button class="tool-btn" data-tool="waypoint" data-tooltip="Waypoint"><span class="tool-icon" style="color:#9ca3af">●</span><span class="tool-label">Waypoint</span></button>
-      <button class="tool-btn" data-tool="loop-path" data-tooltip="ループ経路作成"><span class="tool-icon" style="color:#4ade80">/</span><span class="tool-label">ループ経路作成</span></button>
+      <button class="tool-btn" data-tool="loop-path" data-tooltip="経路作成"><span class="tool-icon" style="color:#4ade80">/</span><span class="tool-label">経路作成</span></button>
       <button class="tool-btn" data-tool="home-branch" data-tooltip="Home枝接続"><span class="tool-icon" style="color:#60a5fa">⎇</span><span class="tool-label">Home枝接続</span></button>
+      <button class="tool-btn" data-tool="sync-area" data-tooltip="SyncArea作成"><span class="tool-icon" style="color:#facc15">⬠</span><span class="tool-label">SyncArea作成</span></button>
       <button class="tool-btn" data-tool="delete" data-tooltip="削除"><span class="tool-icon">🗑</span><span class="tool-label">削除</span></button>
       <button class="tool-btn" data-tool="scale" data-tooltip="スケール設定"><span class="tool-icon">📏</span><span class="tool-label">スケール設定</span></button>
+      <div class="param-row" style="margin-top:8px;">
+        <label for="segment-direction">経路属性</label>
+        <select id="segment-direction">
+          <option value="bidirectional">A↔B（両通行）</option>
+          <option value="forward">A→B（片方向）</option>
+          <option value="reverse">B→A（片方向）</option>
+        </select>
+      </div>
     </div>
 
     <!-- Parameters Section -->
@@ -135,6 +145,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <div class="param-row"><label>ドッキング</label><div><input type="number" id="param-docking" value="30" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>リリース</label><div><input type="number" id="param-release" value="20" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>AMR台数</label><div><input type="number" id="param-amr-count" value="1" min="1" max="10" step="1"><span class="unit">台</span></div></div>
+      <div class="param-row"><label>Pickup供給周期</label><div><input type="number" id="param-pickup-interval" value="20" min="1" max="600" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>スケール</label><div><input type="number" id="param-scale" value="0.1" min="0.001" max="10" step="0.001"><span class="unit">m/px</span></div></div>
     </div>
 
@@ -200,6 +211,7 @@ const state = {
   loopSegments: new Set(),      // ループ部セグメントID集合
   homeSegments: new Set(),      // Home枝セグメントID集合
   loopOrder: [],                // ループ部ノードの順序配列
+  syncAreas: [],                // 排他進入エリア [{id, points:[{x,y}], occupantAmrId}]
   amrs: [],
   config: {
     scale: 0.1,
@@ -207,18 +219,22 @@ const state = {
     dockingTime: 30,
     releaseTime: 20,
     amrCount: 1,
+    pickupSupplyInterval: 20,
     simSpeed: 1,
     ffSpeed: 3
   },
   bgImage: null,
   nodeCounter: 0,
   segCounter: 0,
+  syncAreaCounter: 0,
+  segmentDirectionMode: 'bidirectional',
   simTime: 0,
   running: false,
   paused: false,
   totalDeliveries: 0,
   cycleRecords: [],
-  segmentReservation: new Map()
+  segmentReservation: new Map(),
+  pickupSupply: new Map()
 };
 
 // ============================================================
@@ -231,6 +247,18 @@ function pointToSegmentDist(px, py, ax, ay, bx, by) {
   let t = ((px - ax)*dx + (py - ay)*dy) / lenSq;
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(px - (ax + t*dx), py - (ay + t*dy));
+}
+
+function pointInPolygon(x, y, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x, yi = points[i].y;
+    const xj = points[j].x, yj = points[j].y;
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-9) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 // ============================================================
@@ -264,25 +292,16 @@ const graphManager = {
     this._rebuildLoopOrder();
   },
 
-  // ループセグメントを追加
+  // 経路セグメントを追加（自由接続）
   addLoopSegment(fromId, toId) {
     if (fromId === toId) return { ok: false, msg: '同一ノードには接続できません' };
     const nf = state.nodes.get(fromId), nt = state.nodes.get(toId);
     if (!nf || !nt) return { ok: false, msg: 'ノードが見つかりません' };
 
-    // 型チェック
-    const loopTypes = ['pickup', 'dropoff', 'waypoint'];
-    if (!loopTypes.includes(nf.type)) return { ok: false, msg: `${nf.label} はループ部に配置できません（Homeノードはループ外）` };
-    if (!loopTypes.includes(nt.type)) return { ok: false, msg: `${nt.label} はループ部に配置できません（Homeノードはループ外）` };
-
     // 重複チェック
     if (this.getSegmentBetween(fromId, toId)) return { ok: false, msg: 'すでにセグメントが存在します' };
 
-    // ループ内次数チェック
-    if (this.getLoopDegree(fromId) >= 2) return { ok: false, msg: `${nf.label} にはすでに2本のループセグメントがあります（分岐不可）` };
-    if (this.getLoopDegree(toId) >= 2) return { ok: false, msg: `${nt.label} にはすでに2本のループセグメントがあります（分岐不可）` };
-
-    const seg = this._createSegment(fromId, toId);
+    const seg = this._createSegment(fromId, toId, state.segmentDirectionMode);
     state.loopSegments.add(seg.id);
     this._rebuildLoopOrder();
     return { ok: true, seg };
@@ -307,20 +326,30 @@ const graphManager = {
     // 重複チェック
     if (this.getSegmentBetween(loopNodeId, homeNodeId)) return { ok: false, msg: 'すでにセグメントが存在します' };
 
-    const seg = this._createSegment(loopNodeId, homeNodeId);
+    const seg = this._createSegment(loopNodeId, homeNodeId, state.segmentDirectionMode);
     state.homeSegments.add(seg.id);
     return { ok: true, seg };
   },
 
-  _createSegment(fromId, toId) {
+  _createSegment(fromId, toId, direction = 'bidirectional') {
     const id = 's' + (++state.segCounter);
     const nf = state.nodes.get(fromId), nt = state.nodes.get(toId);
     const dx = nt.x - nf.x, dy = nt.y - nf.y;
-    const seg = { id, from: fromId, to: toId, distance: Math.sqrt(dx*dx + dy*dy) * state.config.scale };
+    const seg = { id, from: fromId, to: toId, direction, distance: Math.sqrt(dx*dx + dy*dy) * state.config.scale };
     state.segments.set(id, seg);
     state.adjacency.get(fromId).add(toId);
     state.adjacency.get(toId).add(fromId);
     return seg;
+  },
+
+  canTraverse(seg, fromId, toId) {
+    if (!seg) return false;
+    if (seg.direction === 'bidirectional') {
+      return (seg.from === fromId && seg.to === toId) || (seg.from === toId && seg.to === fromId);
+    }
+    if (seg.direction === 'forward') return seg.from === fromId && seg.to === toId;
+    if (seg.direction === 'reverse') return seg.from === toId && seg.to === fromId;
+    return false;
   },
 
   removeSegment(id) {
@@ -345,17 +374,9 @@ const graphManager = {
     return deg;
   },
 
-  // ループが完成しているか
+  // 経路が1本以上あるか
   isLoopComplete() {
-    const loopNodes = this._getLoopNodes();
-    if (loopNodes.size < 2) return false;
-    // 最小ループ: 2ノード1セグメント
-    if (loopNodes.size === 2 && state.loopSegments.size === 1) return true;
-    // 閉ループ: 全ループノードが次数2
-    for (const nid of loopNodes) {
-      if (this.getLoopDegree(nid) !== 2) return false;
-    }
-    return loopNodes.size >= 3;
+    return state.loopSegments.size > 0;
   },
 
   _getLoopNodes() {
@@ -440,57 +461,51 @@ const graphManager = {
 // CORE - Pathfinder (Loop Trace)
 // ============================================================
 const pathfinder = {
-  // ループ上の2方向探索
-  // startId: ループ部のノードID, targetIds: 目的ノードID配列
-  // returns: ノードID配列（パス）またはnull
+  _hasPickupCart(pickupId) {
+    const supply = state.pickupSupply.get(pickupId);
+    return !!supply && supply.availableCarts > 0;
+  },
+
+  // 任意グラフ上の最短経路探索（Dijkstra）
   findLoopPath(startId, targetIds) {
-    const { loopOrder } = state;
-    if (!loopOrder.length) return null;
-    const startIdx = loopOrder.indexOf(startId);
-    if (startIdx === -1) return null;
-    const N = loopOrder.length;
+    if (!state.nodes.has(startId)) return null;
     const targets = new Set(targetIds);
     if (targets.has(startId)) return [startId];
 
-    // 最小ループ (2ノード)
-    if (N === 2) {
-      const other = loopOrder[1 - startIdx];
-      if (targets.has(other)) return [startId, other];
-      return null;
-    }
+    const dist = new Map([[startId, 0]]);
+    const prev = new Map();
+    const visited = new Set();
+    const queue = [startId];
 
-    // CW探索
-    let cwDist = 0, cwPath = null;
-    {
-      const path = [startId];
-      for (let i = 1; i < N; i++) {
-        const nodeId = loopOrder[(startIdx + i) % N];
-        const prevId = loopOrder[(startIdx + i - 1) % N];
-        const seg = graphManager.getSegmentBetween(prevId, nodeId);
-        cwDist += seg ? seg.distance : Infinity;
-        path.push(nodeId);
-        if (targets.has(nodeId)) { cwPath = [...path]; break; }
+    while (queue.length > 0) {
+      queue.sort((a, b) => (dist.get(a) ?? Infinity) - (dist.get(b) ?? Infinity));
+      const cur = queue.shift();
+      if (!cur || visited.has(cur)) continue;
+      visited.add(cur);
+      if (targets.has(cur)) {
+        const path = [];
+        let node = cur;
+        while (node) {
+          path.push(node);
+          node = prev.get(node);
+        }
+        return path.reverse();
+      }
+
+      const neighbors = [...(state.adjacency.get(cur) || [])];
+      for (const nxt of neighbors) {
+        if (visited.has(nxt)) continue;
+        const seg = graphManager.getSegmentBetween(cur, nxt);
+        if (!seg || !graphManager.canTraverse(seg, cur, nxt)) continue;
+        const nd = (dist.get(cur) ?? Infinity) + seg.distance;
+        if (nd < (dist.get(nxt) ?? Infinity)) {
+          dist.set(nxt, nd);
+          prev.set(nxt, cur);
+          queue.push(nxt);
+        }
       }
     }
-
-    // CCW探索
-    let ccwDist = 0, ccwPath = null;
-    {
-      const path = [startId];
-      for (let i = 1; i < N; i++) {
-        const nodeId = loopOrder[(startIdx - i + N) % N];
-        const nextId = loopOrder[(startIdx - i + 1 + N) % N];
-        const seg = graphManager.getSegmentBetween(nextId, nodeId);
-        ccwDist += seg ? seg.distance : Infinity;
-        path.push(nodeId);
-        if (targets.has(nodeId)) { ccwPath = [...path]; break; }
-      }
-    }
-
-    if (!cwPath && !ccwPath) return null;
-    if (!cwPath) return ccwPath;
-    if (!ccwPath) return cwPath;
-    return cwDist <= ccwDist ? cwPath : ccwPath;
+    return null;
   },
 
   // Homeノードから目的ノードへのパス（Home枝→ループ→target）
@@ -498,6 +513,8 @@ const pathfinder = {
     const homeAdj = [...(state.adjacency.get(homeId) || [])];
     if (!homeAdj.length) return null;
     const connectNode = homeAdj[0]; // ループ部へのゲートノード
+    const homeSeg = graphManager.getSegmentBetween(homeId, connectNode);
+    if (!homeSeg || !graphManager.canTraverse(homeSeg, homeId, connectNode)) return null;
     const loopPath = this.findLoopPath(connectNode, targetIds);
     if (!loopPath) return null;
     if (loopPath[0] === homeId) return loopPath;
@@ -505,8 +522,8 @@ const pathfinder = {
   },
 
   // ループ部ノードから最寄りHomeへのパス（ループ→Home枝）
-  findToHome(startId) {
-    const homes = [...state.nodes.values()].filter(n => n.type === 'home');
+  findToHome(startId, excludeHomeIds = new Set()) {
+    const homes = [...state.nodes.values()].filter(n => n.type === 'home' && !excludeHomeIds.has(n.id));
     if (!homes.length) return null;
 
     let bestPath = null, bestDist = Infinity;
@@ -514,6 +531,8 @@ const pathfinder = {
       const homeAdj = [...(state.adjacency.get(home.id) || [])];
       if (!homeAdj.length) continue;
       const connectNode = homeAdj[0];
+      const homeSeg = graphManager.getSegmentBetween(connectNode, home.id);
+      if (!homeSeg || !graphManager.canTraverse(homeSeg, connectNode, home.id)) continue;
       const loopPath = this.findLoopPath(startId, [connectNode]);
       if (!loopPath) continue;
       const fullPath = [...loopPath, home.id];
@@ -527,7 +546,7 @@ const pathfinder = {
   // excludeIds: 他AMRが割り当て済みのPickupIDセット
   findNearestPickupOnLoop(startId, excludeIds) {
     const targets = [...state.nodes.values()]
-      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id))
+      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id) && this._hasPickupCart(n.id))
       .map(n => n.id);
     if (!targets.length) return null;
 
@@ -553,7 +572,7 @@ const pathfinder = {
   // Homeからのタスク探索
   findNearestPickupFromHome(homeId, excludeIds) {
     const targets = [...state.nodes.values()]
-      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id))
+      .filter(n => n.type === 'pickup' && !excludeIds.has(n.id) && this._hasPickupCart(n.id))
       .map(n => n.id);
     if (!targets.length) return null;
     return this.findFromHome(homeId, targets);
@@ -563,7 +582,8 @@ const pathfinder = {
     let d = 0;
     for (let i = 0; i < path.length - 1; i++) {
       const seg = graphManager.getSegmentBetween(path[i], path[i+1]);
-      if (seg) d += seg.distance;
+      if (!seg || !graphManager.canTraverse(seg, path[i], path[i+1])) return Infinity;
+      d += seg.distance;
     }
     return d;
   }
@@ -597,15 +617,95 @@ const collisionManager = {
 // CORE - Simulation Engine
 // ============================================================
 const simEngine = {
+  _initPickupSupply() {
+    state.pickupSupply.clear();
+    const interval = Math.max(1, state.config.pickupSupplyInterval || 20);
+    const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
+    for (const pickup of pickups) {
+      state.pickupSupply.set(pickup.id, {
+        availableCarts: 1,
+        nextSupplyTime: interval
+      });
+    }
+  },
+
+  _refreshPickupSupply() {
+    const interval = Math.max(1, state.config.pickupSupplyInterval || 20);
+    for (const [pickupId, supply] of state.pickupSupply) {
+      if (!state.nodes.has(pickupId)) {
+        state.pickupSupply.delete(pickupId);
+        continue;
+      }
+      while (state.simTime >= supply.nextSupplyTime) {
+        if (supply.availableCarts < 1) supply.availableCarts = 1;
+        supply.nextSupplyTime += interval;
+      }
+    }
+  },
+
+  _hasCartAtPickup(pickupId) {
+    const supply = state.pickupSupply.get(pickupId);
+    return !!supply && supply.availableCarts > 0;
+  },
+
+  _consumePickupCart(pickupId) {
+    const supply = state.pickupSupply.get(pickupId);
+    if (!supply || supply.availableCarts <= 0) return false;
+    supply.availableCarts--;
+    return true;
+  },
+
+  _syncAreasContainingPoint(x, y) {
+    return state.syncAreas.filter(area => area.points.length >= 3 && pointInPolygon(x, y, area.points));
+  },
+
+  _getBlockingSyncArea(amr, nx, ny) {
+    const currentAreas = this._syncAreasContainingPoint(amr.x, amr.y);
+    const nextAreas = this._syncAreasContainingPoint(nx, ny);
+    const currentIds = new Set(currentAreas.map(a => a.id));
+    for (const area of nextAreas) {
+      const entering = !currentIds.has(area.id);
+      if (entering && area.occupantAmrId && area.occupantAmrId !== amr.id) {
+        return area;
+      }
+    }
+    return null;
+  },
+
+
+  _handleSyncAreaBlocked(amr, dt, blockingArea) {
+    amr.syncBlockTimer += dt;
+
+    const isOutsideBlockingArea = blockingArea ? !pointInPolygon(amr.x, amr.y, blockingArea.points) : false;
+    if (amr.currentSegment && isOutsideBlockingArea && amr.syncBlockTimer >= 0.5) {
+      collisionManager.release(amr.id, amr.currentSegment);
+      amr.currentSegment = null;
+    }
+  },
+
+  _updateSyncAreaOccupancy(amr, x, y) {
+    for (const area of state.syncAreas) {
+      if (area.points.length < 3) continue;
+      const inside = pointInPolygon(x, y, area.points);
+      if (inside) {
+        if (!area.occupantAmrId) area.occupantAmrId = amr.id;
+      } else if (area.occupantAmrId === amr.id) {
+        area.occupantAmrId = null;
+      }
+    }
+  },
+
   init() {
     state.amrs = [];
     state.simTime = 0;
     state.totalDeliveries = 0;
     state.cycleRecords = [];
     state.segmentReservation.clear();
+    this._initPickupSupply();
+    for (const area of state.syncAreas) area.occupantAmrId = null;
 
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
-    const count = Math.min(state.config.amrCount, 10);
+    const count = Math.min(state.config.amrCount, 10, homes.length);
 
     for (let i = 0; i < count; i++) {
       const home = homes[i % homes.length];
@@ -619,6 +719,7 @@ const simEngine = {
         y: home.y,
         currentNodeId: home.id,
         currentPath: null,
+        targetHomeId: home.id,
         pathIndex: 0,
         hasCargo: false,
         taskCount: 0,
@@ -627,6 +728,7 @@ const simEngine = {
         waitTimer: 0,
         totalWaitingTime: 0,
         waitDeadlockTimer: 0,
+        syncBlockTimer: 0,
         assignedPickup: null,
         assignedDropoff: null,
         direction: 0,
@@ -637,6 +739,10 @@ const simEngine = {
 
   update(dt) {
     state.simTime += dt;
+    this._refreshPickupSupply();
+    for (const area of state.syncAreas) {
+      if (area.occupantAmrId && !state.amrs.some(a => a.id === area.occupantAmrId)) area.occupantAmrId = null;
+    }
     for (const amr of state.amrs) {
       this._updateAMR(amr, dt);
     }
@@ -649,7 +755,7 @@ const simEngine = {
       case 'docking':           this._handleDocking(amr, dt); break;
       case 'moving_to_dropoff': this._handleMoving(amr, dt, 'releasing'); break;
       case 'releasing':         this._handleReleasing(amr, dt); break;
-      case 'returning_home':    this._handleMoving(amr, dt, 'at_home'); break;
+      case 'returning_home':    this._handleReturningHome(amr, dt); break;
     }
     amr.blinkTimer += dt;
   },
@@ -657,9 +763,43 @@ const simEngine = {
   _getAssignedPickups() {
     const assigned = new Set();
     for (const amr of state.amrs) {
-      if (amr.assignedPickup) assigned.add(amr.assignedPickup);
+      // Pickupの重複割当は「Pickupへ向かっている最中」のAMRのみを対象にする。
+      // ドッキング開始後（在庫消費後）やDropOff搬送中は予約解除扱いとする。
+      if (amr.state === 'moving_to_pickup' && amr.assignedPickup) {
+        assigned.add(amr.assignedPickup);
+      }
     }
     return assigned;
+  },
+
+  _getReservedHomes(excludeAmrId = null) {
+    const reserved = new Set();
+    for (const amr of state.amrs) {
+      if (excludeAmrId && amr.id === excludeAmrId) continue;
+      if (amr.targetHomeId) reserved.add(amr.targetHomeId);
+      const node = state.nodes.get(amr.currentNodeId);
+      if (node && node.type === 'home' && amr.state === 'at_home') reserved.add(node.id);
+    }
+    return reserved;
+  },
+
+  _tryStartReturnHome(amr) {
+    const reservedHomes = this._getReservedHomes(amr.id);
+    const homePath = pathfinder.findToHome(amr.currentNodeId, reservedHomes);
+    if (!homePath || homePath.length === 0) {
+      amr.state = 'returning_home';
+      amr.currentPath = null;
+      amr.pathIndex = 0;
+      amr.targetHomeId = null;
+      return false;
+    }
+    const targetHomeId = homePath[homePath.length - 1];
+    amr.state = 'returning_home';
+    amr.currentPath = homePath;
+    amr.pathIndex = 1;
+    amr.targetHomeId = targetHomeId;
+    if (homePath.length > 1) this._startSegment(amr);
+    return true;
   },
 
   _handleAtHome(amr) {
@@ -667,6 +807,7 @@ const simEngine = {
     const path = pathfinder.findNearestPickupFromHome(amr.currentNodeId, assignedPickups);
     if (path) {
       amr.assignedPickup = path[path.length - 1];
+      amr.targetHomeId = null;
       amr.state = 'moving_to_pickup';
       amr.currentPath = path;
       amr.pathIndex = 1;
@@ -694,6 +835,16 @@ const simEngine = {
     }
   },
 
+  _handleReturningHome(amr, dt) {
+    if (!amr.currentPath || amr.pathIndex >= amr.currentPath.length) {
+      if (!this._tryStartReturnHome(amr)) {
+        amr.totalWaitingTime += dt;
+        return;
+      }
+    }
+    this._handleMoving(amr, dt, 'at_home');
+  },
+
   _handleReleasing(amr, dt) {
     amr.waitTimer += dt;
     if (amr.waitTimer >= state.config.releaseTime) {
@@ -719,22 +870,22 @@ const simEngine = {
           this._onPickupArrival(amr);
         }
       } else {
-        // 全Pickupが占有中 → Homeへ退避
+        // 在庫ありのPickupが存在しない/割当不可 → Homeへ退避
         amr.assignedPickup = null;
-        const homePath = pathfinder.findToHome(amr.currentNodeId);
-        if (homePath) {
-          amr.state = 'returning_home';
-          amr.currentPath = homePath;
-          amr.pathIndex = 1;
-          if (homePath.length > 1) this._startSegment(amr);
-        } else {
-          amr.state = 'at_home';
-        }
+        this._tryStartReturnHome(amr);
       }
     }
   },
 
   _onPickupArrival(amr) {
+    if (!this._hasCartAtPickup(amr.currentNodeId)) {
+      amr.assignedPickup = null;
+      this._tryStartReturnHome(amr);
+      return;
+    }
+    this._consumePickupCart(amr.currentNodeId);
+    amr.assignedPickup = null;
+
     // サイクルタイム計測
     if (amr.cycleStartTime !== null) {
       const ct = state.simTime - amr.cycleStartTime;
@@ -753,6 +904,51 @@ const simEngine = {
     amr.waitTimer = 0;
   },
 
+  _recoverFromMovementStall(amr, nextState) {
+    if (amr.currentSegment) return;
+    collisionManager.releaseAll(amr.id);
+
+    if (nextState === 'docking') {
+      if (amr.assignedPickup && this._hasCartAtPickup(amr.assignedPickup)) {
+        const path = pathfinder.findLoopPath(amr.currentNodeId, [amr.assignedPickup]);
+        if (path && path.length > 1) {
+          amr.currentPath = path;
+          amr.pathIndex = 1;
+          this._startSegment(amr);
+          return;
+        }
+      }
+      amr.assignedPickup = null;
+      this._tryStartReturnHome(amr);
+      return;
+    }
+
+    if (nextState === 'releasing') {
+      if (amr.assignedDropoff) {
+        const path = pathfinder.findLoopPath(amr.currentNodeId, [amr.assignedDropoff]);
+        if (path && path.length > 1) {
+          amr.currentPath = path;
+          amr.pathIndex = 1;
+          this._startSegment(amr);
+        }
+      }
+      return;
+    }
+
+    if (nextState === 'at_home') {
+      this._tryStartReturnHome(amr);
+    }
+  },
+
+  _handleMovementStall(amr, dt, nextState) {
+    amr.totalWaitingTime += dt;
+    amr.waitDeadlockTimer += dt;
+    if (amr.waitDeadlockTimer >= 5) {
+      this._recoverFromMovementStall(amr, nextState);
+      amr.waitDeadlockTimer = 0;
+    }
+  },
+
   _handleMoving(amr, dt, nextState) {
     if (!amr.currentPath || amr.pathIndex >= amr.currentPath.length) {
       this._onPathComplete(amr, nextState);
@@ -768,8 +964,7 @@ const simEngine = {
       this._startSegment(amr);
       if (!amr.currentSegment) {
         // 待機中
-        amr.totalWaitingTime += dt;
-        amr.waitDeadlockTimer += dt;
+        this._handleMovementStall(amr, dt, nextState);
         return;
       }
     }
@@ -781,9 +976,17 @@ const simEngine = {
     const distToTarget = Math.hypot(dx, dy);
 
     if (distToTarget <= movePx) {
+      const blockingArea = this._getBlockingSyncArea(amr, target.x, target.y);
+      if (blockingArea) {
+        this._handleSyncAreaBlocked(amr, dt, blockingArea);
+        this._handleMovementStall(amr, dt, nextState);
+        return;
+      }
       // ノード到着
       amr.x = target.x;
       amr.y = target.y;
+      amr.syncBlockTimer = 0;
+      this._updateSyncAreaOccupancy(amr, amr.x, amr.y);
       amr.currentNodeId = targetId;
       collisionManager.release(amr.id, amr.currentSegment);
       amr.currentSegment = null;
@@ -796,8 +999,18 @@ const simEngine = {
       }
     } else {
       const ratio = movePx / distToTarget;
-      amr.x += dx * ratio;
-      amr.y += dy * ratio;
+      const nx = amr.x + dx * ratio;
+      const ny = amr.y + dy * ratio;
+      const blockingArea = this._getBlockingSyncArea(amr, nx, ny);
+      if (blockingArea) {
+        this._handleSyncAreaBlocked(amr, dt, blockingArea);
+        this._handleMovementStall(amr, dt, nextState);
+        return;
+      }
+      amr.x = nx;
+      amr.y = ny;
+      amr.syncBlockTimer = 0;
+      this._updateSyncAreaOccupancy(amr, amr.x, amr.y);
       amr.direction = Math.atan2(dy, dx);
     }
   },
@@ -815,6 +1028,7 @@ const simEngine = {
     } else if (nextState === 'at_home') {
       amr.state = 'at_home';
       amr.assignedPickup = null;
+      amr.targetHomeId = amr.currentNodeId;
     }
   },
 
@@ -824,7 +1038,13 @@ const simEngine = {
     const fromId = prevIdx >= 0 ? amr.currentPath[prevIdx] : amr.currentNodeId;
     const toId = amr.currentPath[amr.pathIndex];
     const seg = graphManager.getSegmentBetween(fromId, toId);
-    if (!seg) { amr.pathIndex++; return; }
+    if (!seg || !graphManager.canTraverse(seg, fromId, toId)) { amr.pathIndex++; return; }
+
+    const targetNode = state.nodes.get(toId);
+    if (targetNode && this._getBlockingSyncArea(amr, targetNode.x, targetNode.y)) {
+      amr.currentSegment = null;
+      return;
+    }
 
     if (collisionManager.tryReserve(amr.id, seg.id)) {
       amr.currentSegment = seg.id;
@@ -869,6 +1089,28 @@ const renderer = {
     }
 
     // セグメント描画
+    for (const area of state.syncAreas) {
+      if (area.points.length < 3) continue;
+      ctx.beginPath();
+      ctx.moveTo(area.points[0].x, area.points[0].y);
+      for (let i = 1; i < area.points.length; i++) ctx.lineTo(area.points[i].x, area.points[i].y);
+      ctx.closePath();
+      ctx.fillStyle = area.occupantAmrId ? 'rgba(250,204,21,0.22)' : 'rgba(250,204,21,0.12)';
+      ctx.fill();
+      ctx.strokeStyle = area.occupantAmrId ? '#f59e0b' : '#facc15';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const cx = area.points.reduce((s, p) => s + p.x, 0) / area.points.length;
+      const cy = area.points.reduce((s, p) => s + p.y, 0) / area.points.length;
+      ctx.fillStyle = '#fde68a';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`SyncArea (${area.occupantAmrId ? '使用中' : '空き'})`, cx, cy);
+    }
+
     for (const seg of state.segments.values()) {
       const a = state.nodes.get(seg.from), b = state.nodes.get(seg.to);
       if (!a || !b) continue;
@@ -900,6 +1142,13 @@ const renderer = {
       }
       ctx.stroke();
       ctx.setLineDash([]);
+
+      if (seg.direction !== 'bidirectional') {
+        const isForward = seg.direction === 'forward';
+        const fromNode = isForward ? a : b;
+        const toNode = isForward ? b : a;
+        this._drawDirectionArrow(fromNode.x, fromNode.y, toNode.x, toNode.y, isReserved ? '#fb923c' : '#f8fafc');
+      }
 
       // 距離ラベル
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
@@ -999,6 +1248,42 @@ const renderer = {
         ctx.setLineDash([]);
       }
     }
+
+    if (ih.currentTool === 'sync-area' && ih.syncAreaPoints.length > 0) {
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(ih.syncAreaPoints[0].x, ih.syncAreaPoints[0].y);
+      for (let i = 1; i < ih.syncAreaPoints.length; i++) {
+        ctx.lineTo(ih.syncAreaPoints[i].x, ih.syncAreaPoints[i].y);
+      }
+      if (ih.mouseX !== null) ctx.lineTo(ih.mouseX, ih.mouseY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  },
+
+  _drawDirectionArrow(ax, ay, bx, by, color) {
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    if (len < 16) return;
+    const ux = dx / len, uy = dy / len;
+    const arrowLen = 10;
+    const arrowWidth = 5;
+    const tipX = ax + dx * 0.58;
+    const tipY = ay + dy * 0.58;
+    const baseX = tipX - ux * arrowLen;
+    const baseY = tipY - uy * arrowLen;
+    const px = -uy, py = ux;
+
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(baseX + px * arrowWidth, baseY + py * arrowWidth);
+    ctx.lineTo(baseX - px * arrowWidth, baseY - py * arrowWidth);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
   },
 
   _drawNode(n) {
@@ -1012,6 +1297,16 @@ const renderer = {
         ctx.strokeRect(n.x - 10, n.y - 10, 20, 20);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('P', n.x, n.y);
+        {
+          const carts = state.pickupSupply.get(n.id)?.availableCarts ?? 0;
+          ctx.beginPath();
+          ctx.arc(n.x + 11, n.y - 11, 6, 0, Math.PI * 2);
+          ctx.fillStyle = carts > 0 ? '#fde047' : '#64748b';
+          ctx.fill();
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 8px sans-serif';
+          ctx.fillText(String(carts), n.x + 11, n.y - 11);
+        }
         break;
       case 'dropoff':
         ctx.fillStyle = '#ef4444';
@@ -1114,6 +1409,7 @@ const inputHandler = {
   loopPathNodes: [],         // ループ作成中の選択ノード列
   loopPathSegIds: [],        // ループ作成中に追加したセグメントID列
   homeBranchSource: null,    // Home枝接続の接続元ノードID
+  syncAreaPoints: [],        // SyncArea作成中の頂点列
   scalePoints: [],
   draggingNode: null,
   mouseX: null,
@@ -1152,6 +1448,10 @@ const inputHandler = {
     } else if (this.currentTool === 'home-branch' && this.homeBranchSource) {
       this.homeBranchSource = null;
       renderer.render();
+    } else if (this.currentTool === 'sync-area' && this.syncAreaPoints.length > 0) {
+      this.syncAreaPoints = [];
+      showNotif('SyncArea作成をキャンセルしました', 'info');
+      renderer.render();
     }
   },
 
@@ -1170,12 +1470,18 @@ const inputHandler = {
       this._handleLoopPathClick(pos);
     } else if (tool === 'home-branch') {
       this._handleHomeBranchClick(pos);
+    } else if (tool === 'sync-area') {
+      this._handleSyncAreaClick(pos);
     } else if (tool === 'delete') {
       const node = graphManager.findNearNode(pos.x, pos.y);
       if (node) { graphManager.removeNode(node.id); }
       else {
         const seg = graphManager.findNearSegment(pos.x, pos.y);
         if (seg) graphManager.removeSegment(seg.id);
+        else {
+          const areaIndex = state.syncAreas.findIndex(area => pointInPolygon(pos.x, pos.y, area.points));
+          if (areaIndex >= 0) state.syncAreas.splice(areaIndex, 1);
+        }
       }
       renderer.render();
     } else if (tool === 'scale') {
@@ -1198,12 +1504,6 @@ const inputHandler = {
     const node = graphManager.findNearNode(pos.x, pos.y);
     if (!node) return;
 
-    // Homeノードはブロック
-    if (node.type === 'home') {
-      showNotif('Homeノードはループ部に配置できません', 'error');
-      return;
-    }
-
     if (this.loopPathNodes.length === 0) {
       // 始点として選択
       this.loopPathNodes = [node.id];
@@ -1215,17 +1515,11 @@ const inputHandler = {
     const startId = this.loopPathNodes[0];
     const lastId = this.loopPathNodes[this.loopPathNodes.length - 1];
 
-    // 始点をクリック → ループ閉じる（3ノード以上）
+    // 始点をクリック → 経路確定（閉路でなくても可）
     if (node.id === startId && this.loopPathNodes.length >= 2) {
-      const result = graphManager.addLoopSegment(lastId, startId);
-      if (!result.ok) {
-        showNotif(result.msg, 'error');
-        return;
-      }
-      this.loopPathSegIds.push(result.seg.id);
       this.loopPathNodes = [];
       this.loopPathSegIds = [];
-      showNotif('ループが完成しました！', 'success');
+      showNotif('経路作成を確定しました', 'success');
       renderer.render();
       return;
     }
@@ -1242,24 +1536,11 @@ const inputHandler = {
     this.loopPathSegIds.push(result.seg.id);
     this.loopPathNodes.push(node.id);
 
-    // ループ完成チェック（最小ループ A↔B）
-    if (graphManager.isLoopComplete()) {
-      this.loopPathNodes = [];
-      this.loopPathSegIds = [];
-      showNotif('最小ループ（A↔B）が完成しました！', 'success');
-    } else {
-      const isStart = this.loopPathNodes.length > 1 &&
-        graphManager.getSegmentBetween(node.id, startId) !== null;
-      showNotif(`${node.label} を追加。始点をクリックでループ閉じる（現在${this.loopPathNodes.length}ノード）`, 'info');
-    }
+    showNotif(`${node.label} を追加。継続してノード追加、または始点クリックで確定（現在${this.loopPathNodes.length}ノード）`, 'info');
     renderer.render();
   },
 
   _handleHomeBranchClick(pos) {
-    if (!graphManager.isLoopComplete()) {
-      showNotif('ループ部を先に完成させてください', 'error');
-      return;
-    }
     const node = graphManager.findNearNode(pos.x, pos.y);
     if (!node) return;
 
@@ -1289,6 +1570,33 @@ const inputHandler = {
       this.homeBranchSource = null;
       renderer.render();
     }
+  },
+
+  _handleSyncAreaClick(pos) {
+    if (this.syncAreaPoints.length === 0) {
+      this.syncAreaPoints.push({ x: pos.x, y: pos.y });
+      showNotif('SyncArea開始点を設定。頂点を追加し、始点を再クリックで確定', 'info');
+      renderer.render();
+      return;
+    }
+
+    const start = this.syncAreaPoints[0];
+    const isClose = Math.hypot(pos.x - start.x, pos.y - start.y) <= 12;
+    if (isClose && this.syncAreaPoints.length >= 3) {
+      state.syncAreas.push({
+        id: 'sa' + (++state.syncAreaCounter),
+        points: [...this.syncAreaPoints],
+        occupantAmrId: null
+      });
+      this.syncAreaPoints = [];
+      showNotif('SyncAreaを作成しました', 'success');
+      renderer.render();
+      return;
+    }
+
+    this.syncAreaPoints.push({ x: pos.x, y: pos.y });
+    showNotif(`頂点を追加しました（${this.syncAreaPoints.length}点）`, 'info');
+    renderer.render();
   },
 
   _onMouseMove(e) {
@@ -1341,6 +1649,11 @@ document.getElementById('scale-ok').addEventListener('click', () => {
   }
   document.getElementById('scale-modal').style.display = 'none';
 });
+
+document.getElementById('segment-direction').addEventListener('change', e => {
+  state.segmentDirectionMode = e.target.value;
+  showNotif(`経路属性を ${e.target.selectedOptions[0].textContent} に設定しました`, 'info');
+});
 document.getElementById('scale-cancel').addEventListener('click', () => {
   document.getElementById('scale-modal').style.display = 'none';
 });
@@ -1362,6 +1675,7 @@ const uiController = {
         inputHandler.loopPathNodes = [];
         inputHandler.loopPathSegIds = [];
         inputHandler.homeBranchSource = null;
+        inputHandler.syncAreaPoints = [];
         inputHandler.scalePoints = [];
         this.updateToolButtons();
         renderer.render();
@@ -1383,6 +1697,10 @@ const uiController = {
     document.getElementById('param-docking').addEventListener('change', e => { state.config.dockingTime = parseFloat(e.target.value) || 30; });
     document.getElementById('param-release').addEventListener('change', e => { state.config.releaseTime = parseFloat(e.target.value) || 20; });
     document.getElementById('param-amr-count').addEventListener('change', e => { state.config.amrCount = Math.min(10, Math.max(1, parseInt(e.target.value) || 1)); });
+    document.getElementById('param-pickup-interval').addEventListener('change', e => {
+      state.config.pickupSupplyInterval = Math.max(1, parseFloat(e.target.value) || 20);
+      e.target.value = state.config.pickupSupplyInterval;
+    });
     document.getElementById('param-scale').addEventListener('change', e => {
       state.config.scale = parseFloat(e.target.value) || 0.1;
       graphManager.recalcDistances();
@@ -1418,8 +1736,8 @@ const uiController = {
   },
 
   _validateForSim() {
-    if (!graphManager.isLoopComplete()) {
-      showNotif('ループ経路が未完成です。ループ経路作成ツールでループを作成してください', 'error');
+    if (state.segments.size === 0) {
+      showNotif('経路がありません。経路作成ツールでセグメントを追加してください', 'error');
       return false;
     }
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
@@ -1498,6 +1816,8 @@ const uiController = {
     state.cycleRecords = [];
     state.amrs = [];
     state.segmentReservation.clear();
+    state.pickupSupply.clear();
+    for (const area of state.syncAreas) area.occupantAmrId = null;
     state.config.simSpeed = 1;
     state._lastSpeed = 1;
     const playBtn = document.getElementById('btn-play-pause');
@@ -1522,6 +1842,7 @@ const uiController = {
     document.getElementById('stat-time').textContent =
       `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
     document.getElementById('stat-deliveries').textContent = state.totalDeliveries + ' 回';
+    const pickupTotal = [...state.pickupSupply.values()].reduce((sum, s) => sum + s.availableCarts, 0);
 
     // サイクルレコードから平均を計算（初回サイクルは除く）
     const validRecords = state.cycleRecords;
@@ -1554,6 +1875,7 @@ const uiController = {
         detailHtml += `<div class="amr-stat">${line}</div>`;
         overlayHtml += `<div class="os-row"><span class="os-label">${amr.label}</span><span class="os-value">${amr.taskCount}回 ${avgCT}s 待${waitPct}%</span></div>`;
       }
+      detailHtml += `<div class="amr-stat">供給中の台車数: ${pickupTotal} 台</div>`;
     } else {
       document.getElementById('overlay-stats').style.display = 'none';
     }
