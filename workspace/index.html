@@ -125,6 +125,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <button class="tool-btn" data-tool="waypoint" data-tooltip="Waypoint"><span class="tool-icon" style="color:#9ca3af">●</span><span class="tool-label">Waypoint</span></button>
       <button class="tool-btn" data-tool="loop-path" data-tooltip="ループ経路作成"><span class="tool-icon" style="color:#4ade80">/</span><span class="tool-label">ループ経路作成</span></button>
       <button class="tool-btn" data-tool="home-branch" data-tooltip="Home枝接続"><span class="tool-icon" style="color:#60a5fa">⎇</span><span class="tool-label">Home枝接続</span></button>
+      <button class="tool-btn" data-tool="sync-area" data-tooltip="SyncArea作成"><span class="tool-icon" style="color:#facc15">⬠</span><span class="tool-label">SyncArea作成</span></button>
       <button class="tool-btn" data-tool="delete" data-tooltip="削除"><span class="tool-icon">🗑</span><span class="tool-label">削除</span></button>
       <button class="tool-btn" data-tool="scale" data-tooltip="スケール設定"><span class="tool-icon">📏</span><span class="tool-label">スケール設定</span></button>
       <div class="param-row" style="margin-top:8px;">
@@ -210,6 +211,7 @@ const state = {
   loopSegments: new Set(),      // ループ部セグメントID集合
   homeSegments: new Set(),      // Home枝セグメントID集合
   loopOrder: [],                // ループ部ノードの順序配列
+  syncAreas: [],                // 排他進入エリア [{id, points:[{x,y}], occupantAmrId}]
   amrs: [],
   config: {
     scale: 0.1,
@@ -224,6 +226,7 @@ const state = {
   bgImage: null,
   nodeCounter: 0,
   segCounter: 0,
+  syncAreaCounter: 0,
   segmentDirectionMode: 'bidirectional',
   simTime: 0,
   running: false,
@@ -244,6 +247,18 @@ function pointToSegmentDist(px, py, ax, ay, bx, by) {
   let t = ((px - ax)*dx + (py - ay)*dy) / lenSq;
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(px - (ax + t*dx), py - (ay + t*dy));
+}
+
+function pointInPolygon(x, y, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x, yi = points[i].y;
+    const xj = points[j].x, yj = points[j].y;
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-9) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 // ============================================================
@@ -676,6 +691,35 @@ const simEngine = {
     return true;
   },
 
+  _syncAreasContainingPoint(x, y) {
+    return state.syncAreas.filter(area => area.points.length >= 3 && pointInPolygon(x, y, area.points));
+  },
+
+  _canMoveToPosition(amr, nx, ny) {
+    const currentAreas = this._syncAreasContainingPoint(amr.x, amr.y);
+    const nextAreas = this._syncAreasContainingPoint(nx, ny);
+    const currentIds = new Set(currentAreas.map(a => a.id));
+    for (const area of nextAreas) {
+      const entering = !currentIds.has(area.id);
+      if (entering && area.occupantAmrId && area.occupantAmrId !== amr.id) {
+        return false;
+      }
+    }
+    return true;
+  },
+
+  _updateSyncAreaOccupancy(amr, x, y) {
+    for (const area of state.syncAreas) {
+      if (area.points.length < 3) continue;
+      const inside = pointInPolygon(x, y, area.points);
+      if (inside) {
+        if (!area.occupantAmrId) area.occupantAmrId = amr.id;
+      } else if (area.occupantAmrId === amr.id) {
+        area.occupantAmrId = null;
+      }
+    }
+  },
+
   init() {
     state.amrs = [];
     state.simTime = 0;
@@ -683,6 +727,7 @@ const simEngine = {
     state.cycleRecords = [];
     state.segmentReservation.clear();
     this._initPickupSupply();
+    for (const area of state.syncAreas) area.occupantAmrId = null;
 
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
     const count = Math.min(state.config.amrCount, 10);
@@ -718,6 +763,9 @@ const simEngine = {
   update(dt) {
     state.simTime += dt;
     this._refreshPickupSupply();
+    for (const area of state.syncAreas) {
+      if (area.occupantAmrId && !state.amrs.some(a => a.id === area.occupantAmrId)) area.occupantAmrId = null;
+    }
     for (const amr of state.amrs) {
       this._updateAMR(amr, dt);
     }
@@ -877,9 +925,14 @@ const simEngine = {
     const distToTarget = Math.hypot(dx, dy);
 
     if (distToTarget <= movePx) {
+      if (!this._canMoveToPosition(amr, target.x, target.y)) {
+        amr.totalWaitingTime += dt;
+        return;
+      }
       // ノード到着
       amr.x = target.x;
       amr.y = target.y;
+      this._updateSyncAreaOccupancy(amr, amr.x, amr.y);
       amr.currentNodeId = targetId;
       collisionManager.release(amr.id, amr.currentSegment);
       amr.currentSegment = null;
@@ -892,8 +945,15 @@ const simEngine = {
       }
     } else {
       const ratio = movePx / distToTarget;
-      amr.x += dx * ratio;
-      amr.y += dy * ratio;
+      const nx = amr.x + dx * ratio;
+      const ny = amr.y + dy * ratio;
+      if (!this._canMoveToPosition(amr, nx, ny)) {
+        amr.totalWaitingTime += dt;
+        return;
+      }
+      amr.x = nx;
+      amr.y = ny;
+      this._updateSyncAreaOccupancy(amr, amr.x, amr.y);
       amr.direction = Math.atan2(dy, dx);
     }
   },
@@ -965,6 +1025,28 @@ const renderer = {
     }
 
     // セグメント描画
+    for (const area of state.syncAreas) {
+      if (area.points.length < 3) continue;
+      ctx.beginPath();
+      ctx.moveTo(area.points[0].x, area.points[0].y);
+      for (let i = 1; i < area.points.length; i++) ctx.lineTo(area.points[i].x, area.points[i].y);
+      ctx.closePath();
+      ctx.fillStyle = area.occupantAmrId ? 'rgba(250,204,21,0.22)' : 'rgba(250,204,21,0.12)';
+      ctx.fill();
+      ctx.strokeStyle = area.occupantAmrId ? '#f59e0b' : '#facc15';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const cx = area.points.reduce((s, p) => s + p.x, 0) / area.points.length;
+      const cy = area.points.reduce((s, p) => s + p.y, 0) / area.points.length;
+      ctx.fillStyle = '#fde68a';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`SyncArea (${area.occupantAmrId ? '使用中' : '空き'})`, cx, cy);
+    }
+
     for (const seg of state.segments.values()) {
       const a = state.nodes.get(seg.from), b = state.nodes.get(seg.to);
       if (!a || !b) continue;
@@ -1101,6 +1183,20 @@ const renderer = {
         ctx.stroke();
         ctx.setLineDash([]);
       }
+    }
+
+    if (ih.currentTool === 'sync-area' && ih.syncAreaPoints.length > 0) {
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(ih.syncAreaPoints[0].x, ih.syncAreaPoints[0].y);
+      for (let i = 1; i < ih.syncAreaPoints.length; i++) {
+        ctx.lineTo(ih.syncAreaPoints[i].x, ih.syncAreaPoints[i].y);
+      }
+      if (ih.mouseX !== null) ctx.lineTo(ih.mouseX, ih.mouseY);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
   },
 
@@ -1249,6 +1345,7 @@ const inputHandler = {
   loopPathNodes: [],         // ループ作成中の選択ノード列
   loopPathSegIds: [],        // ループ作成中に追加したセグメントID列
   homeBranchSource: null,    // Home枝接続の接続元ノードID
+  syncAreaPoints: [],        // SyncArea作成中の頂点列
   scalePoints: [],
   draggingNode: null,
   mouseX: null,
@@ -1287,6 +1384,10 @@ const inputHandler = {
     } else if (this.currentTool === 'home-branch' && this.homeBranchSource) {
       this.homeBranchSource = null;
       renderer.render();
+    } else if (this.currentTool === 'sync-area' && this.syncAreaPoints.length > 0) {
+      this.syncAreaPoints = [];
+      showNotif('SyncArea作成をキャンセルしました', 'info');
+      renderer.render();
     }
   },
 
@@ -1305,12 +1406,18 @@ const inputHandler = {
       this._handleLoopPathClick(pos);
     } else if (tool === 'home-branch') {
       this._handleHomeBranchClick(pos);
+    } else if (tool === 'sync-area') {
+      this._handleSyncAreaClick(pos);
     } else if (tool === 'delete') {
       const node = graphManager.findNearNode(pos.x, pos.y);
       if (node) { graphManager.removeNode(node.id); }
       else {
         const seg = graphManager.findNearSegment(pos.x, pos.y);
         if (seg) graphManager.removeSegment(seg.id);
+        else {
+          const areaIndex = state.syncAreas.findIndex(area => pointInPolygon(pos.x, pos.y, area.points));
+          if (areaIndex >= 0) state.syncAreas.splice(areaIndex, 1);
+        }
       }
       renderer.render();
     } else if (tool === 'scale') {
@@ -1426,6 +1533,33 @@ const inputHandler = {
     }
   },
 
+  _handleSyncAreaClick(pos) {
+    if (this.syncAreaPoints.length === 0) {
+      this.syncAreaPoints.push({ x: pos.x, y: pos.y });
+      showNotif('SyncArea開始点を設定。頂点を追加し、始点を再クリックで確定', 'info');
+      renderer.render();
+      return;
+    }
+
+    const start = this.syncAreaPoints[0];
+    const isClose = Math.hypot(pos.x - start.x, pos.y - start.y) <= 12;
+    if (isClose && this.syncAreaPoints.length >= 3) {
+      state.syncAreas.push({
+        id: 'sa' + (++state.syncAreaCounter),
+        points: [...this.syncAreaPoints],
+        occupantAmrId: null
+      });
+      this.syncAreaPoints = [];
+      showNotif('SyncAreaを作成しました', 'success');
+      renderer.render();
+      return;
+    }
+
+    this.syncAreaPoints.push({ x: pos.x, y: pos.y });
+    showNotif(`頂点を追加しました（${this.syncAreaPoints.length}点）`, 'info');
+    renderer.render();
+  },
+
   _onMouseMove(e) {
     const pos = this._getPos(e);
     this.mouseX = pos.x;
@@ -1502,6 +1636,7 @@ const uiController = {
         inputHandler.loopPathNodes = [];
         inputHandler.loopPathSegIds = [];
         inputHandler.homeBranchSource = null;
+        inputHandler.syncAreaPoints = [];
         inputHandler.scalePoints = [];
         this.updateToolButtons();
         renderer.render();
@@ -1643,6 +1778,7 @@ const uiController = {
     state.amrs = [];
     state.segmentReservation.clear();
     state.pickupSupply.clear();
+    for (const area of state.syncAreas) area.occupantAmrId = null;
     state.config.simSpeed = 1;
     state._lastSpeed = 1;
     const playBtn = document.getElementById('btn-play-pause');

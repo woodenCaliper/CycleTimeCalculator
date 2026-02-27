@@ -33,6 +33,7 @@ AMR（Autonomous Mobile Robot）を顧客拠点に導入する際、実際の倉
 | ノード（Node） | 経路上の接続点。Station・Waypoint・Waiting Areaを含む。**ループ部ノード**（Pickup/DropOff/Waypoint）は最大2本のループセグメント＋任意本数のHome枝セグメントを持てる。**Homeノード**は必ず1本のみ（リーフ） |
 | セグメント（Segment） | 2つのノードを結ぶ直線区間 |
 | 経路属性（Direction Attribute） | 各セグメントに付与される通行方向属性。`A↔B（双方向）` / `A→B（片方向）` / `B→A（片方向）` の3種 |
+| SyncArea | ユーザーが直線で囲って作成する多角形エリア。エリア内には同時に1台のAMRのみ侵入可能 |
 | サイクルタイム | AMRが1往復分のタスク（Pickup到着→ドッキング→DropOff到着→リリース→次のPickup到着）を完了するまでの総時間。HomeへのReturn移動はサイクルに含まない |
 | ドッキング | AMRが台車と結合する作業 |
 | リリース | AMRが台車を切り離す作業 |
@@ -55,6 +56,7 @@ Step 3: 経路の作成
   └→ ノード同士をクリックで接続し、走行経路（折れ線）を作成
   └→ 経路は必ず1ループを形成しなければならない（分岐不可）
   └→ A↔B の2ノード1セグメントも最小ループとして有効
+  └→ 必要に応じて SyncArea（排他進入エリア）を多角形で作成
 
 Step 4: パラメータの設定
   └→ AMRの走行速度
@@ -117,6 +119,13 @@ Step 5: シミュレーション実行
 - 各セグメント中点に距離（m）を表示
 - 双方向セグメントは従来通りの線表示、片方向セグメントは進行方向の矢印を重ねて表示
 - ループ部が未完成の状態ではシミュレーション開始不可（UIでエラー表示）
+
+##### ③ SyncAreaの作成（排他進入エリア）
+- 「SyncArea作成モード」に切り替え
+- Canvas上をクリックして頂点を追加し、始点を再クリックして多角形を確定
+- SyncAreaは直線辺のみで構成される閉領域（3頂点以上）
+- **制約**: 同一SyncArea内には同時に1台のAMRのみ侵入可能
+- 先行AMRがSyncArea内にいる場合、後続AMRは境界外で待機する
 
 #### Step 4: パラメータ設定
 - サイドパネルで以下を入力
@@ -208,6 +217,20 @@ Graph = {
   loopOrder: nodeId[]                   // ループ部ノードの順序配列（経路トレース用）
 }
 ```
+
+### 4.7 SyncArea
+
+```javascript
+SyncArea = {
+  id: "sa_001",
+  points: [{x: 100, y: 100}, {x: 220, y: 120}, {x: 180, y: 260}],
+  occupantAmrId: null | "amr_001"
+}
+```
+
+- `occupantAmrId` が `null` の場合のみ、新たなAMRの侵入を許可する
+- 侵入後は当該AMRがエリア外へ出るまで占有を維持する
+- 複数SyncAreaにまたがる場合は、侵入対象のすべてで空きであることが必要
 
 #### バリデーション
 
@@ -330,6 +353,7 @@ Pickup Station → （以降ループ）
 
       case "moving_to_pickup":
         → 経路に沿って移動（衝突回避あり）
+        → 進入先がSyncArea内で、他AMRが占有中なら境界外で待機
         → Pickup Station到着
           → 在庫あり: 1台消費し currentCycleStart = 現在時刻、"docking" へ遷移
           → 在庫なし: タスクなしとして "returning_home" へ遷移
@@ -342,6 +366,7 @@ Pickup Station → （以降ループ）
 
       case "moving_to_dropoff":
         → ループ経路に沿って移動（衝突回避あり）
+        → 進入先がSyncArea内で、他AMRが占有中なら境界外で待機
         → DropOff Station到着 → "releasing" へ遷移、waitTimer リセット
 
       case "releasing":
@@ -356,6 +381,7 @@ Pickup Station → （以降ループ）
 
       case "returning_home":
         → Home枝経路に沿って移動（衝突回避あり）
+        → 進入先がSyncArea内で、他AMRが占有中なら境界外で待機
         → Home到着 → "at_home" へ遷移
 
       case "waiting":
@@ -910,6 +936,7 @@ distance(m) = sqrt((x2-x1)² + (y2-y1)²) * scale
 - **ループ部ノードのループ内次数は最大2**（3本以上のループ接続はUIレベルでブロック）
 - **Waiting Area（Home）はループ部に含まれない**。ループ部ノードから枝として延びるリーフノードとしてのみ配置可能
 - **Homeノードの次数は必ず1**（2本以上の接続はUIレベルでブロック）
+- SyncAreaはユーザーが任意に作成できるが、同一エリア内のAMRは同時に1台まで
 - ループ部が未完成の状態ではシミュレーションを開始できない
 - Homeノードが1つも存在しない場合もシミュレーション開始不可
 
