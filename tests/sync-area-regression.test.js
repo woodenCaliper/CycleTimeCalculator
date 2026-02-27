@@ -266,3 +266,71 @@ test('two SyncAreas around pickup and relay waypoint do not deadlock delivery fl
 
   assert.equal(result.deliveries > 0, true);
 });
+
+
+test('blocked moving_to_pickup AMR does not yield home without mutual SyncArea deadlock', () => {
+  const context = loadAppContext();
+
+  const result = vm.runInContext(`(() => {
+    state.nodes.clear();
+    state.segments.clear();
+    state.adjacency.clear();
+    state.loopSegments.clear();
+    state.homeSegments.clear();
+    state.loopOrder = [];
+    state.syncAreas = [];
+    state.nodeCounter = 0;
+    state.segCounter = 0;
+    state.syncAreaCounter = 0;
+    state.segmentReservation.clear();
+
+    const pickup = graphManager.addNode('pickup', 100, 200, 'Pickup');
+    const relay = graphManager.addNode('waypoint', 300, 200, 'Relay');
+    graphManager.addLoopSegment(relay.id, pickup.id);
+    graphManager.addLoopSegment(pickup.id, relay.id);
+
+    state.syncAreas.push({
+      id: 'pickupArea',
+      points: [{ x: 60, y: 160 }, { x: 140, y: 160 }, { x: 140, y: 240 }, { x: 60, y: 240 }],
+      occupantAmrId: 'amr_2'
+    });
+    state.syncAreas.push({
+      id: 'relayArea',
+      points: [{ x: 250, y: 160 }, { x: 350, y: 160 }, { x: 350, y: 240 }, { x: 250, y: 240 }],
+      occupantAmrId: 'amr_1'
+    });
+
+    const amr1 = simulationLogic.createInitialAmr(relay, 0);
+    amr1.id = 'amr_1';
+    amr1.state = 'moving_to_pickup';
+    amr1.currentNodeId = relay.id;
+    amr1.currentPath = [relay.id, pickup.id];
+    amr1.pathIndex = 1;
+    amr1.x = 300;
+    amr1.y = 200;
+    amr1.assignedPickup = pickup.id;
+
+    const amr2 = simulationLogic.createInitialAmr(pickup, 1);
+    amr2.id = 'amr_2';
+    amr2.state = 'docking';
+    amr2.currentNodeId = pickup.id;
+    amr2.currentPath = null;
+    amr2.pathIndex = 0;
+    amr2.x = 100;
+    amr2.y = 200;
+
+    state.amrs = [amr1, amr2];
+    state.config.amrSpeed = 1;
+    state.config.scale = 0.1;
+
+    for (let i = 0; i < 50; i++) simEngine.update(0.1);
+
+    return {
+      state: state.amrs[0].state,
+      assignedPickup: state.amrs[0].assignedPickup
+    };
+  })()`, context);
+
+  assert.equal(result.state, 'moving_to_pickup');
+  assert.notEqual(result.assignedPickup, null);
+});

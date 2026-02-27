@@ -779,6 +779,19 @@ const simEngine = {
   },
 
 
+  _isMutualSyncBlock(amr, blockingArea) {
+    if (!blockingArea || !blockingArea.occupantAmrId || blockingArea.occupantAmrId === amr.id) return false;
+    const other = state.amrs.find(a => a.id === blockingArea.occupantAmrId);
+    if (!other || !other.currentPath || other.pathIndex >= other.currentPath.length) return false;
+
+    const otherTargetId = other.currentPath[other.pathIndex];
+    const otherTarget = state.nodes.get(otherTargetId);
+    if (!otherTarget) return false;
+
+    const otherBlockingArea = this._getBlockingSyncArea(other, otherTarget.x, otherTarget.y);
+    return !!otherBlockingArea && otherBlockingArea.occupantAmrId === amr.id;
+  },
+
   _handleSyncAreaBlocked(amr, dt, blockingArea) {
     amr.syncBlockTimer += dt;
 
@@ -789,7 +802,8 @@ const simEngine = {
     }
 
     const currentAreas = this._syncAreasContainingPoint(amr.x, amr.y);
-    const canYieldToHome = amr.state === 'moving_to_pickup' && currentAreas.length > 0;
+    const mutualSyncDeadlock = this._isMutualSyncBlock(amr, blockingArea);
+    const canYieldToHome = amr.state === 'moving_to_pickup' && currentAreas.length > 0 && mutualSyncDeadlock;
     if (canYieldToHome && amr.syncBlockTimer >= 3) {
       collisionManager.releaseAll(amr.id);
       amr.currentSegment = null;
@@ -803,6 +817,7 @@ const simEngine = {
 
     return false;
   },
+
 
   _updateSyncAreaOccupancy(amr, x, y) {
     for (const area of state.syncAreas) {
