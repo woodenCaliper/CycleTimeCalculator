@@ -128,14 +128,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <button class="tool-btn" data-tool="sync-area" data-tooltip="SyncArea作成"><span class="tool-icon" style="color:#facc15">⬠</span><span class="tool-label">SyncArea作成</span></button>
       <button class="tool-btn" data-tool="delete" data-tooltip="削除"><span class="tool-icon">🗑</span><span class="tool-label">削除</span></button>
       <button class="tool-btn" data-tool="scale" data-tooltip="スケール設定"><span class="tool-icon">📏</span><span class="tool-label">スケール設定</span></button>
-      <div class="param-row" style="margin-top:8px;">
-        <label for="segment-direction">経路属性</label>
-        <select id="segment-direction">
-          <option value="bidirectional">A↔B（両通行）</option>
-          <option value="forward">A→B（片方向）</option>
-          <option value="reverse">B→A（片方向）</option>
-        </select>
-      </div>
     </div>
 
     <!-- Parameters Section -->
@@ -227,13 +219,11 @@ const state = {
   nodeCounter: 0,
   segCounter: 0,
   syncAreaCounter: 0,
-  segmentDirectionMode: 'bidirectional',
   simTime: 0,
   running: false,
   paused: false,
   totalDeliveries: 0,
   cycleRecords: [],
-  segmentReservation: new Map(),
   pickupSupply: new Map()
 };
 
@@ -250,6 +240,15 @@ function pointToSegmentDist(px, py, ax, ay, bx, by) {
 }
 
 function pointInPolygon(x, y, points) {
+  const edgeEpsilon = 0.5;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x, yi = points[i].y;
+    const xj = points[j].x, yj = points[j].y;
+    if (pointToSegmentDist(x, y, xi, yi, xj, yj) <= edgeEpsilon) {
+      return true;
+    }
+  }
+
   let inside = false;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
     const xi = points[i].x, yi = points[i].y;
@@ -344,8 +343,7 @@ const simulationLogic = {
 };
 
 const renderLogic = {
-  getSegmentStyle({ isReserved, isLoop, isHome }) {
-    if (isReserved) return { dash: [], color: 'rgba(249,115,22,0.7)', width: 4 };
+  getSegmentStyle({ isLoop, isHome }) {
     if (isLoop) return { dash: [], color: 'rgba(74,222,128,0.7)', width: 2.5 };
     if (isHome) return { dash: [6, 4], color: 'rgba(96,165,250,0.7)', width: 2 };
     return { dash: [4, 4], color: 'rgba(150,150,150,0.5)', width: 1.5 };
@@ -398,7 +396,7 @@ const graphManager = {
     // 重複チェック
     if (this.getSegmentBetween(fromId, toId)) return { ok: false, msg: 'すでにセグメントが存在します' };
 
-    const seg = this._createSegment(fromId, toId, state.segmentDirectionMode);
+    const seg = this._createSegment(fromId, toId);
     state.loopSegments.add(seg.id);
     this._rebuildLoopOrder();
     return { ok: true, seg };
@@ -423,16 +421,16 @@ const graphManager = {
     // 重複チェック
     if (this.getSegmentBetween(loopNodeId, homeNodeId)) return { ok: false, msg: 'すでにセグメントが存在します' };
 
-    const seg = this._createSegment(loopNodeId, homeNodeId, state.segmentDirectionMode);
+    const seg = this._createSegment(loopNodeId, homeNodeId);
     state.homeSegments.add(seg.id);
     return { ok: true, seg };
   },
 
-  _createSegment(fromId, toId, direction = 'bidirectional') {
+  _createSegment(fromId, toId) {
     const id = 's' + (++state.segCounter);
     const nf = state.nodes.get(fromId), nt = state.nodes.get(toId);
     const dx = nt.x - nf.x, dy = nt.y - nf.y;
-    const seg = { id, from: fromId, to: toId, direction, distance: Math.sqrt(dx*dx + dy*dy) * state.config.scale };
+    const seg = { id, from: fromId, to: toId, direction: 'bidirectional', distance: Math.sqrt(dx*dx + dy*dy) * state.config.scale };
     state.segments.set(id, seg);
     state.adjacency.get(fromId).add(toId);
     state.adjacency.get(toId).add(fromId);
@@ -441,12 +439,7 @@ const graphManager = {
 
   canTraverse(seg, fromId, toId) {
     if (!seg) return false;
-    if (seg.direction === 'bidirectional') {
-      return (seg.from === fromId && seg.to === toId) || (seg.from === toId && seg.to === fromId);
-    }
-    if (seg.direction === 'forward') return seg.from === fromId && seg.to === toId;
-    if (seg.direction === 'reverse') return seg.from === toId && seg.to === fromId;
-    return false;
+    return (seg.from === fromId && seg.to === toId) || (seg.from === toId && seg.to === fromId);
   },
 
   removeSegment(id) {
@@ -457,7 +450,6 @@ const graphManager = {
     state.segments.delete(id);
     state.loopSegments.delete(id);
     state.homeSegments.delete(id);
-    state.segmentReservation.delete(id);
     this._rebuildLoopOrder();
   },
 
@@ -689,27 +681,6 @@ const pathfinder = {
 // ============================================================
 // CORE - Collision Manager
 // ============================================================
-const collisionManager = {
-  tryReserve(amrId, segId) {
-    const current = state.segmentReservation.get(segId);
-    if (!current || current === amrId) {
-      state.segmentReservation.set(segId, amrId);
-      return true;
-    }
-    return false;
-  },
-  release(amrId, segId) {
-    if (state.segmentReservation.get(segId) === amrId) {
-      state.segmentReservation.delete(segId);
-    }
-  },
-  releaseAll(amrId) {
-    for (const [sid, owner] of state.segmentReservation) {
-      if (owner === amrId) state.segmentReservation.delete(sid);
-    }
-  }
-};
-
 // ============================================================
 // CORE - Simulation Engine
 // ============================================================
@@ -770,15 +741,43 @@ const simEngine = {
   },
 
 
+  _isMutualSyncBlock(amr, blockingArea) {
+    if (!blockingArea || !blockingArea.occupantAmrId || blockingArea.occupantAmrId === amr.id) return false;
+    const other = state.amrs.find(a => a.id === blockingArea.occupantAmrId);
+    if (!other || !other.currentPath || other.pathIndex >= other.currentPath.length) return false;
+
+    const otherTargetId = other.currentPath[other.pathIndex];
+    const otherTarget = state.nodes.get(otherTargetId);
+    if (!otherTarget) return false;
+
+    const otherBlockingArea = this._getBlockingSyncArea(other, otherTarget.x, otherTarget.y);
+    return !!otherBlockingArea && otherBlockingArea.occupantAmrId === amr.id;
+  },
+
   _handleSyncAreaBlocked(amr, dt, blockingArea) {
     amr.syncBlockTimer += dt;
 
     const isOutsideBlockingArea = blockingArea ? !pointInPolygon(amr.x, amr.y, blockingArea.points) : false;
     if (amr.currentSegment && isOutsideBlockingArea && amr.syncBlockTimer >= 0.5) {
-      collisionManager.release(amr.id, amr.currentSegment);
       amr.currentSegment = null;
     }
+
+    const currentAreas = this._syncAreasContainingPoint(amr.x, amr.y);
+    const mutualSyncDeadlock = this._isMutualSyncBlock(amr, blockingArea);
+    const canYieldToHome = amr.state === 'moving_to_pickup' && currentAreas.length > 0 && mutualSyncDeadlock;
+    if (canYieldToHome && amr.syncBlockTimer >= 3) {
+      amr.currentSegment = null;
+      amr.currentPath = null;
+      amr.pathIndex = 0;
+      amr.assignedPickup = null;
+      amr.syncBlockTimer = 0;
+      this._tryStartReturnHome(amr);
+      return true;
+    }
+
+    return false;
   },
+
 
   _updateSyncAreaOccupancy(amr, x, y) {
     for (const area of state.syncAreas) {
@@ -792,12 +791,32 @@ const simEngine = {
     }
   },
 
+  _refreshSyncAreaOccupancy() {
+    for (const area of state.syncAreas) {
+      if (area.points.length < 3) {
+        area.occupantAmrId = null;
+        continue;
+      }
+
+      const insideAmrs = state.amrs.filter(amr => pointInPolygon(amr.x, amr.y, area.points));
+      if (insideAmrs.length === 0) {
+        area.occupantAmrId = null;
+        continue;
+      }
+
+      if (area.occupantAmrId && insideAmrs.some(amr => amr.id === area.occupantAmrId)) {
+        continue;
+      }
+
+      area.occupantAmrId = insideAmrs[0].id;
+    }
+  },
+
   init() {
     state.amrs = [];
     state.simTime = 0;
     state.totalDeliveries = 0;
     state.cycleRecords = [];
-    state.segmentReservation.clear();
     this._initPickupSupply();
     for (const area of state.syncAreas) area.occupantAmrId = null;
 
@@ -809,6 +828,12 @@ const simEngine = {
       if (!home) continue;
       state.amrs.push(simulationLogic.createInitialAmr(home, i));
     }
+
+    this._refreshSyncAreaOccupancy();
+  },
+
+  _isAmrInsideSyncArea(amr) {
+    return state.syncAreas.some(area => area.points.length >= 3 && pointInPolygon(amr.x, amr.y, area.points));
   },
 
   update(dt) {
@@ -817,9 +842,20 @@ const simEngine = {
     for (const area of state.syncAreas) {
       if (area.occupantAmrId && !state.amrs.some(a => a.id === area.occupantAmrId)) area.occupantAmrId = null;
     }
+
+    const insideSync = [];
+    const outsideSync = [];
     for (const amr of state.amrs) {
-      this._updateAMR(amr, dt);
+      if (this._isAmrInsideSyncArea(amr)) {
+        insideSync.push(amr);
+      } else {
+        outsideSync.push(amr);
+      }
     }
+
+    for (const amr of insideSync) this._updateAMR(amr, dt);
+    for (const amr of outsideSync) this._updateAMR(amr, dt);
+    this._refreshSyncAreaOccupancy();
   },
 
   _updateAMR(amr, dt) {
@@ -980,7 +1016,6 @@ const simEngine = {
 
   _recoverFromMovementStall(amr, nextState) {
     if (amr.currentSegment) return;
-    collisionManager.releaseAll(amr.id);
 
     if (nextState === 'docking') {
       if (amr.assignedPickup && this._hasCartAtPickup(amr.assignedPickup)) {
@@ -1037,8 +1072,14 @@ const simEngine = {
     if (!amr.currentSegment) {
       this._startSegment(amr);
       if (!amr.currentSegment) {
-        // 待機中
-        this._handleMovementStall(amr, dt, nextState);
+        const blockingArea = this._getBlockingSyncArea(amr, target.x, target.y);
+        if (blockingArea) {
+          const yielded = this._handleSyncAreaBlocked(amr, dt, blockingArea);
+          if (!yielded) this._handleMovementStall(amr, dt, nextState);
+        } else {
+          // 待機中
+          this._handleMovementStall(amr, dt, nextState);
+        }
         return;
       }
     }
@@ -1051,8 +1092,8 @@ const simEngine = {
     if (moveState.reached) {
       const blockingArea = this._getBlockingSyncArea(amr, target.x, target.y);
       if (blockingArea) {
-        this._handleSyncAreaBlocked(amr, dt, blockingArea);
-        this._handleMovementStall(amr, dt, nextState);
+        const yielded = this._handleSyncAreaBlocked(amr, dt, blockingArea);
+        if (!yielded) this._handleMovementStall(amr, dt, nextState);
         return;
       }
       // ノード到着
@@ -1061,7 +1102,6 @@ const simEngine = {
       amr.syncBlockTimer = 0;
       this._updateSyncAreaOccupancy(amr, amr.x, amr.y);
       amr.currentNodeId = targetId;
-      collisionManager.release(amr.id, amr.currentSegment);
       amr.currentSegment = null;
       amr.pathIndex++;
 
@@ -1073,8 +1113,8 @@ const simEngine = {
     } else {
       const blockingArea = this._getBlockingSyncArea(amr, moveState.nextX, moveState.nextY);
       if (blockingArea) {
-        this._handleSyncAreaBlocked(amr, dt, blockingArea);
-        this._handleMovementStall(amr, dt, nextState);
+        const yielded = this._handleSyncAreaBlocked(amr, dt, blockingArea);
+        if (!yielded) this._handleMovementStall(amr, dt, nextState);
         return;
       }
       amr.x = moveState.nextX;
@@ -1086,7 +1126,6 @@ const simEngine = {
   },
 
   _onPathComplete(amr, nextState) {
-    collisionManager.releaseAll(amr.id);
     amr.currentSegment = null;
     amr.currentPath = null;
 
@@ -1116,13 +1155,9 @@ const simEngine = {
       return;
     }
 
-    if (collisionManager.tryReserve(amr.id, seg.id)) {
-      amr.currentSegment = seg.id;
-      const target = state.nodes.get(toId);
-      if (target) amr.direction = Math.atan2(target.y - amr.y, target.x - amr.x);
-    } else {
-      amr.currentSegment = null;
-    }
+    amr.currentSegment = seg.id;
+    const target = state.nodes.get(toId);
+    if (target) amr.direction = Math.atan2(target.y - amr.y, target.x - amr.x);
   }
 };
 
@@ -1188,25 +1223,17 @@ const renderer = {
 
       const isLoop = state.loopSegments.has(seg.id);
       const isHome = state.homeSegments.has(seg.id);
-      const isReserved = state.segmentReservation.has(seg.id);
 
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
 
-      const segmentStyle = renderLogic.getSegmentStyle({ isReserved, isLoop, isHome });
+      const segmentStyle = renderLogic.getSegmentStyle({ isLoop, isHome });
       ctx.setLineDash(segmentStyle.dash);
       ctx.strokeStyle = segmentStyle.color;
       ctx.lineWidth = segmentStyle.width;
       ctx.stroke();
       ctx.setLineDash([]);
-
-      if (seg.direction !== 'bidirectional') {
-        const isForward = seg.direction === 'forward';
-        const fromNode = isForward ? a : b;
-        const toNode = isForward ? b : a;
-        this._drawDirectionArrow(fromNode.x, fromNode.y, toNode.x, toNode.y, isReserved ? '#fb923c' : '#f8fafc');
-      }
 
       // 距離ラベル
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
@@ -1708,10 +1735,6 @@ document.getElementById('scale-ok').addEventListener('click', () => {
   document.getElementById('scale-modal').style.display = 'none';
 });
 
-document.getElementById('segment-direction').addEventListener('change', e => {
-  state.segmentDirectionMode = e.target.value;
-  showNotif(`経路属性を ${e.target.selectedOptions[0].textContent} に設定しました`, 'info');
-});
 document.getElementById('scale-cancel').addEventListener('click', () => {
   document.getElementById('scale-modal').style.display = 'none';
 });
@@ -1873,7 +1896,6 @@ const uiController = {
     state.totalDeliveries = 0;
     state.cycleRecords = [];
     state.amrs = [];
-    state.segmentReservation.clear();
     state.pickupSupply.clear();
     for (const area of state.syncAreas) area.occupantAmrId = null;
     state.config.simSpeed = 1;
