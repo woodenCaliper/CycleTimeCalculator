@@ -90,6 +90,44 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
   margin-bottom: 8px;
 }
 
+.item-group {
+  border: 1px solid #1a4a8a;
+  border-radius: 6px;
+  background: rgba(15, 52, 96, 0.35);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.item-group:last-child { margin-bottom: 0; }
+
+.item-group > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(15, 52, 96, 0.7);
+  border-bottom: 1px solid rgba(26, 74, 138, 0.8);
+}
+
+.item-group > summary::-webkit-details-marker { display: none; }
+
+.item-group > summary::after {
+  content: '▼';
+  float: right;
+  font-size: 10px;
+  color: #9ac7ff;
+}
+
+.item-group:not([open]) > summary::after { content: '▶'; }
+
+.item-group-body {
+  padding: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
 .item-card {
   border: 1px solid #1a4a8a;
   border-radius: 6px;
@@ -104,6 +142,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .item-card-group:last-child { margin-bottom: 0; }
 .item-card-group-label { font-size: 11px; color: #e94560; margin-bottom: 3px; }
 .item-card-line { font-size: 12px; color: #d8d8d8; line-height: 1.4; }
+.item-card-empty { font-size: 12px; color: #9ca3af; padding: 4px 0; }
 
 /* ===== Notification ===== */
 #notification { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(22,33,62,0.95); border: 1px solid #e94560; border-radius: 6px; padding: 6px 14px; font-size: 12px; color: #e94560; display: none; z-index: 150; pointer-events: none; max-width: 340px; text-align: center; }
@@ -208,54 +247,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
     <canvas id="canvas"></canvas>
     <div id="item-status-pane">
       <div class="pane-title">アイテム状態 / 設定</div>
-
-      <div class="item-card" data-item-type="pickup-station">
-        <div class="item-card-title">Pickup Station</div>
-        <div class="item-card-group">
-          <div class="item-card-group-label">状態</div>
-          <div class="item-card-line">待機台車数：○○</div>
-        </div>
-        <div class="item-card-group">
-          <div class="item-card-group-label">設定</div>
-          <div class="item-card-line">（後で追加）</div>
-        </div>
-      </div>
-
-      <div class="item-card" data-item-type="dropoff-station">
-        <div class="item-card-title">Drop Off Station</div>
-        <div class="item-card-group">
-          <div class="item-card-group-label">状態</div>
-          <div class="item-card-line">（後で追加）</div>
-        </div>
-        <div class="item-card-group">
-          <div class="item-card-group-label">設定</div>
-          <div class="item-card-line">（後で追加）</div>
-        </div>
-      </div>
-
-      <div class="item-card" data-item-type="amr">
-        <div class="item-card-title">AMR</div>
-        <div class="item-card-group">
-          <div class="item-card-group-label">状態</div>
-          <div class="item-card-line">（後で追加）</div>
-        </div>
-        <div class="item-card-group">
-          <div class="item-card-group-label">設定</div>
-          <div class="item-card-line">（後で追加）</div>
-        </div>
-      </div>
-
-      <div class="item-card" data-item-type="waiting-area">
-        <div class="item-card-title">Waiting Area</div>
-        <div class="item-card-group">
-          <div class="item-card-group-label">状態</div>
-          <div class="item-card-line">（後で追加）</div>
-        </div>
-        <div class="item-card-group">
-          <div class="item-card-group-label">設定</div>
-          <div class="item-card-line">（後で追加）</div>
-        </div>
-      </div>
+      <div id="item-status-groups"></div>
     </div>
     <div id="notification"></div>
     <div id="overlay-stats" style="display:none;">
@@ -1430,6 +1422,101 @@ function showNotif(msg, type = 'error') {
   notifTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
 }
 
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+// ============================================================
+// UI - Right Item Status Panel
+// ============================================================
+const itemStatusPanel = {
+  groupOpen: {
+    pickup: true,
+    dropoff: true,
+    amr: true,
+    home: true
+  },
+
+  init() {
+    const groupsEl = document.getElementById('item-status-groups');
+    groupsEl.addEventListener('toggle', e => {
+      const details = e.target;
+      if (!(details instanceof HTMLDetailsElement)) return;
+      const key = details.dataset.group;
+      if (!key) return;
+      this.groupOpen[key] = details.open;
+    }, true);
+    this.render();
+  },
+
+  render() {
+    const groupsEl = document.getElementById('item-status-groups');
+    if (!groupsEl) return;
+
+    const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
+    const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
+    const waitingAreas = [...state.nodes.values()].filter(n => n.type === 'home');
+    const amrs = [...state.amrs];
+
+    const html = [
+      this._renderGroup('pickup', 'Pickup Station', pickups, node => this._renderPickupCard(node), 'Pickup Station は未配置です'),
+      this._renderGroup('dropoff', 'Drop Off Station', dropoffs, node => this._renderDefaultNodeCard(node), 'Drop Off Station は未配置です'),
+      this._renderGroup('amr', 'AMR', amrs, amr => this._renderAmrCard(amr), 'AMR は未生成です'),
+      this._renderGroup('home', 'Waiting Area', waitingAreas, node => this._renderDefaultNodeCard(node), 'Waiting Area は未配置です')
+    ].join('');
+
+    groupsEl.innerHTML = html;
+  },
+
+  _renderGroup(key, title, items, cardRenderer, emptyText) {
+    const open = this.groupOpen[key] !== false;
+    const cards = items.length > 0
+      ? items.map((item, index) => cardRenderer(item, index)).join('')
+      : `<div class="item-card-empty">${escapeHtml(emptyText)}</div>`;
+    return `
+      <details class="item-group" data-group="${escapeHtml(key)}" ${open ? 'open' : ''}>
+        <summary>${escapeHtml(title)} (${items.length})</summary>
+        <div class="item-group-body">${cards}</div>
+      </details>
+    `;
+  },
+
+  _renderPickupCard(node) {
+    const waitingCarts = state.pickupSupply.get(node.id)?.availableCarts ?? 0;
+    return this._renderCard(node.label, `待機台車数：${waitingCarts}`, '（後で追加）');
+  },
+
+  _renderDefaultNodeCard(node) {
+    return this._renderCard(node.label, '（後で追加）', '（後で追加）');
+  },
+
+  _renderAmrCard(amr) {
+    const stateLabel = simulationLogic.getAmrStateLabel(amr.state);
+    return this._renderCard(amr.label, `状態：${stateLabel}`, '（後で追加）');
+  },
+
+  _renderCard(title, statusLine, configLine) {
+    return `
+      <div class="item-card">
+        <div class="item-card-title">${escapeHtml(title)}</div>
+        <div class="item-card-group">
+          <div class="item-card-group-label">状態</div>
+          <div class="item-card-line">${escapeHtml(statusLine)}</div>
+        </div>
+        <div class="item-card-group">
+          <div class="item-card-group-label">設定</div>
+          <div class="item-card-line">${escapeHtml(configLine)}</div>
+        </div>
+      </div>
+    `;
+  }
+};
+
 // ============================================================
 // UI - Input Handler
 // ============================================================
@@ -1491,6 +1578,7 @@ const inputHandler = {
     } else if (['pickup', 'dropoff', 'home', 'waypoint'].includes(tool)) {
       graphManager.addNode(tool, pos.x, pos.y);
       renderer.render();
+      itemStatusPanel.render();
     } else if (tool === 'loop-path') {
       this._handleLoopPathClick(pos);
     } else if (tool === 'sync-area') {
@@ -1507,6 +1595,7 @@ const inputHandler = {
         }
       }
       renderer.render();
+      itemStatusPanel.render();
     } else if (tool === 'scale') {
       this.scalePoints.push(pos);
       if (this.scalePoints.length === 2) {
@@ -1627,6 +1716,7 @@ document.querySelector('#context-menu .cm-item[data-action="delete"]').addEventL
   else graphManager.removeSegment(menu._target.id);
   menu.style.display = 'none';
   renderer.render();
+  itemStatusPanel.render();
 });
 
 // Scale modal
@@ -1849,6 +1939,7 @@ const uiController = {
     }
     document.getElementById('stats-detail').innerHTML = detailHtml;
     document.getElementById('overlay-amr-stats').innerHTML = overlayHtml;
+    itemStatusPanel.render();
   }
 };
 
@@ -1878,6 +1969,7 @@ function simLoop(timestamp) {
 // ============================================================
 renderer.resize();
 renderer.render();
+itemStatusPanel.init();
 inputHandler.init();
 uiController.init();
 
