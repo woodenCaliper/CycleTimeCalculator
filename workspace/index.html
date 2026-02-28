@@ -229,6 +229,8 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
         <button class="sim-btn" id="btn-play-pause" data-tooltip="再生/一時停止"><span class="tool-icon">▶</span><span class="btn-label">再生</span></button>
         <button class="sim-btn" id="btn-fast-forward" data-tooltip="早送り"><span class="tool-icon">⏩</span><span class="btn-label">x20</span></button>
         <button class="sim-btn" id="btn-reset" data-tooltip="リセット"><span class="tool-icon">⏹</span><span class="btn-label">Reset</span></button>
+        <button class="sim-btn" id="btn-export-config" data-tooltip="設定をJSONで保存"><span class="tool-icon">💾</span><span class="btn-label">Export</span></button>
+        <button class="sim-btn" id="btn-import-config" data-tooltip="JSON設定を読み込み"><span class="tool-icon">📂</span><span class="btn-label">Import</span></button>
       </div>
       <div class="speed-input-group">
         <label>倍速:</label>
@@ -276,6 +278,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 </div>
 
 <input type="file" id="image-input" accept="image/*" style="display:none;">
+<input type="file" id="config-import-input" accept="application/json,.json" style="display:none;">
 
 <script>
 // ============================================================
@@ -298,6 +301,7 @@ const state = {
     ffSpeed: 20
   },
   bgImage: null,
+  bgImageDataUrl: null,
   nodeCounter: 0,
   segCounter: 0,
   syncAreaCounter: 0,
@@ -335,6 +339,21 @@ function pointInPolygon(x, y, points) {
     if (intersect) inside = !inside;
   }
   return inside;
+}
+
+function parseCounterFromId(id, prefix) {
+  if (typeof id !== 'string' || !id.startsWith(prefix)) return 0;
+  const num = parseInt(id.slice(prefix.length), 10);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('背景画像の読み込みに失敗しました'));
+    img.src = dataUrl;
+  });
 }
 
 // ============================================================
@@ -1852,6 +1871,173 @@ document.getElementById('scale-cancel').addEventListener('click', () => {
   document.getElementById('scale-modal').style.display = 'none';
 });
 
+const persistenceManager = {
+  exportToJson() {
+    const payload = this._createSnapshot();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    a.href = url;
+    a.download = `cycle-time-config-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showNotif('設定をJSONとして保存しました', 'success');
+  },
+
+  async importFromFile(file) {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      await this._applySnapshot(parsed);
+      showNotif('JSON設定を読み込みました', 'success');
+    } catch (error) {
+      showNotif(error.message || 'JSON読み込みに失敗しました', 'error');
+    }
+  },
+
+  _createSnapshot() {
+    return {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      config: { ...state.config },
+      counters: {
+        nodeCounter: state.nodeCounter,
+        segCounter: state.segCounter,
+        syncAreaCounter: state.syncAreaCounter
+      },
+      backgroundImageDataUrl: state.bgImageDataUrl || null,
+      nodes: [...state.nodes.values()].map(node => ({ ...node })),
+      segments: [...state.segments.values()].map(seg => ({ ...seg })),
+      loopSegments: [...state.loopSegments.values()],
+      loopOrder: [...state.loopOrder],
+      syncAreas: state.syncAreas.map(area => ({
+        id: area.id,
+        points: area.points.map(pt => ({ x: pt.x, y: pt.y }))
+      })),
+      pickupSettings: [...state.pickupSettings.entries()].map(([id, settings]) => ({
+        id,
+        supplyInterval: settings.supplyInterval,
+        capacity: settings.capacity
+      }))
+    };
+  },
+
+  async _applySnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') throw new Error('JSON形式が不正です');
+    if (!Array.isArray(snapshot.nodes) || !Array.isArray(snapshot.segments)) {
+      throw new Error('nodes / segments が不足しています');
+    }
+
+    uiController._reset();
+
+    state.nodes = new Map();
+    state.segments = new Map();
+    state.adjacency = new Map();
+    state.loopSegments = new Set();
+    state.loopOrder = [];
+    state.syncAreas = [];
+    state.pickupSettings = new Map();
+    state.pickupSupply.clear();
+
+    for (const rawNode of snapshot.nodes) {
+      if (!rawNode || typeof rawNode.id !== 'string') continue;
+      const node = {
+        id: rawNode.id,
+        type: rawNode.type,
+        x: Number(rawNode.x) || 0,
+        y: Number(rawNode.y) || 0,
+        label: String(rawNode.label || rawNode.id)
+      };
+      state.nodes.set(node.id, node);
+      state.adjacency.set(node.id, new Set());
+    }
+
+    for (const rawSeg of snapshot.segments) {
+      if (!rawSeg || typeof rawSeg.id !== 'string') continue;
+      if (!state.nodes.has(rawSeg.from) || !state.nodes.has(rawSeg.to)) continue;
+      const seg = {
+        id: rawSeg.id,
+        from: rawSeg.from,
+        to: rawSeg.to,
+        distance: Number(rawSeg.distance) || 0
+      };
+      state.segments.set(seg.id, seg);
+      state.adjacency.get(seg.from)?.add(seg.to);
+      state.adjacency.get(seg.to)?.add(seg.from);
+    }
+
+    const loopSegments = Array.isArray(snapshot.loopSegments) ? snapshot.loopSegments : [];
+    for (const segId of loopSegments) {
+      if (state.segments.has(segId)) state.loopSegments.add(segId);
+    }
+
+    state.loopOrder = Array.isArray(snapshot.loopOrder)
+      ? snapshot.loopOrder.filter(nodeId => state.nodes.has(nodeId))
+      : [];
+
+    const syncAreas = Array.isArray(snapshot.syncAreas) ? snapshot.syncAreas : [];
+    state.syncAreas = syncAreas
+      .filter(area => area && typeof area.id === 'string' && Array.isArray(area.points) && area.points.length >= 3)
+      .map(area => ({
+        id: area.id,
+        points: area.points.map(pt => ({ x: Number(pt.x) || 0, y: Number(pt.y) || 0 })),
+        occupantAmrId: null
+      }));
+
+    const pickupSettings = Array.isArray(snapshot.pickupSettings) ? snapshot.pickupSettings : [];
+    for (const entry of pickupSettings) {
+      if (!entry || typeof entry.id !== 'string' || !state.nodes.has(entry.id)) continue;
+      state.pickupSettings.set(entry.id, {
+        supplyInterval: Math.max(1, Number(entry.supplyInterval) || 30),
+        capacity: Math.max(1, Number(entry.capacity) || 1)
+      });
+    }
+
+    for (const node of state.nodes.values()) {
+      if (node.type === 'pickup' && !state.pickupSettings.has(node.id)) {
+        state.pickupSettings.set(node.id, { supplyInterval: 30, capacity: 1 });
+      }
+    }
+
+    const cfg = snapshot.config || {};
+    state.config.scale = Number(cfg.scale) || 0.1;
+    state.config.amrSpeed = Number(cfg.amrSpeed) || 1.0;
+    state.config.dockingTime = Number(cfg.dockingTime) || 30;
+    state.config.releaseTime = Number(cfg.releaseTime) || 20;
+    state.config.ffSpeed = Math.max(2, Math.min(100, parseInt(cfg.ffSpeed, 10) || 20));
+    state.config.simSpeed = 1;
+
+    const importedCounters = snapshot.counters || {};
+    const maxNodeCounter = [...state.nodes.keys()].reduce((max, id) => Math.max(max, parseCounterFromId(id, 'n')), 0);
+    const maxSegCounter = [...state.segments.keys()].reduce((max, id) => Math.max(max, parseCounterFromId(id, 's')), 0);
+    const maxAreaCounter = state.syncAreas.reduce((max, area) => Math.max(max, parseCounterFromId(area.id, 'sa')), 0);
+    state.nodeCounter = Math.max(maxNodeCounter, Number(importedCounters.nodeCounter) || 0);
+    state.segCounter = Math.max(maxSegCounter, Number(importedCounters.segCounter) || 0);
+    state.syncAreaCounter = Math.max(maxAreaCounter, Number(importedCounters.syncAreaCounter) || 0);
+
+    const bgDataUrl = typeof snapshot.backgroundImageDataUrl === 'string' ? snapshot.backgroundImageDataUrl : null;
+    state.bgImageDataUrl = bgDataUrl;
+    if (bgDataUrl) state.bgImage = await loadImageFromDataUrl(bgDataUrl);
+    else state.bgImage = null;
+
+    document.getElementById('param-speed').value = String(state.config.amrSpeed);
+    document.getElementById('param-docking').value = String(state.config.dockingTime);
+    document.getElementById('param-release').value = String(state.config.releaseTime);
+    document.getElementById('param-scale').value = Number(state.config.scale).toFixed(4);
+    document.getElementById('ff-speed-input').value = String(state.config.ffSpeed);
+    document.querySelector('#btn-fast-forward .btn-label').textContent = 'x' + state.config.ffSpeed;
+
+    graphManager.recalcDistances();
+    itemStatusPanel.render();
+    uiController._updateSpeedDisplay();
+    uiController.updateStats();
+    renderer.render();
+  }
+};
+
 // ============================================================
 // UI - Controller
 // ============================================================
@@ -1879,9 +2065,31 @@ const uiController = {
     document.getElementById('image-input').addEventListener('change', e => {
       const file = e.target.files[0];
       if (!file) return;
-      const img = new Image();
-      img.onload = () => { state.bgImage = img; renderer.render(); };
-      img.src = URL.createObjectURL(file);
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const dataUrl = String(reader.result || '');
+          const img = await loadImageFromDataUrl(dataUrl);
+          state.bgImageDataUrl = dataUrl;
+          state.bgImage = img;
+          renderer.render();
+        } catch (error) {
+          showNotif(error.message || '画像読み込みに失敗しました', 'error');
+        }
+      };
+      reader.onerror = () => showNotif('画像ファイルの読み込みに失敗しました', 'error');
+      reader.readAsDataURL(file);
+      e.target.value = '';
+    });
+
+    document.getElementById('btn-export-config').addEventListener('click', () => persistenceManager.exportToJson());
+    document.getElementById('btn-import-config').addEventListener('click', () => {
+      document.getElementById('config-import-input').click();
+    });
+    document.getElementById('config-import-input').addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      persistenceManager.importFromFile(file);
       e.target.value = '';
     });
 
