@@ -1703,10 +1703,10 @@ const itemStatusPanel = {
       : waitingAreas.map((home, index) => simulationLogic.createInitialAmr(home, index));
 
     const html = [
-      this._renderGroup('pickup', 'Pickup Station', pickups, node => this._renderPickupCard(node), 'Pickup Station は未配置です'),
-      this._renderGroup('dropoff', 'Drop Off Station', dropoffs, node => this._renderDropoffCard(node), 'Drop Off Station は未配置です'),
+      this._renderGroup('pickup', 'Pickup Station', pickups, (node, index) => this._renderPickupCard(node, index), 'Pickup Station は未配置です'),
+      this._renderGroup('dropoff', 'Drop Off Station', dropoffs, (node, index) => this._renderDropoffCard(node, index), 'Drop Off Station は未配置です'),
       this._renderGroup('amr', 'AMR', amrs, amr => this._renderAmrCard(amr), 'AMR は未生成です'),
-      this._renderGroup('home', 'Waiting Area', waitingAreas, node => this._renderDefaultNodeCard(node), 'Waiting Area は未配置です'),
+      this._renderGroup('home', 'Waiting Area', waitingAreas, (node, index) => this._renderDefaultNodeCard(node, index), 'Waiting Area は未配置です'),
       this._renderGroup('syncArea', 'Sync Area', syncAreas, area => this._renderSyncAreaCard(area), 'Sync Area は未配置です')
     ].join('');
 
@@ -1734,7 +1734,7 @@ const itemStatusPanel = {
     `;
   },
 
-  _renderPickupCard(node) {
+  _renderPickupCard(node, index) {
     const waitingCarts = state.pickupSupply.get(node.id)?.availableCarts ?? 0;
     const settings = getPickupSettings(node.id);
     const configHtml = `
@@ -1747,10 +1747,10 @@ const itemStatusPanel = {
         <div><input type="number" min="1" step="1" value="${settings.capacity}" data-pickup-id="${escapeHtml(node.id)}" data-config-key="capacity"><span class="unit">台</span></div>
       </div>
     `;
-    return this._renderCard(node.label, `待機台車数：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
+    return this._renderCard(this._getNodePanelLabel(node, index), `待機台車数：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
   },
 
-  _renderDropoffCard(node) {
+  _renderDropoffCard(node, index) {
     const waitingCarts = state.dropoffBuffer.get(node.id)?.waitingCarts ?? 0;
     const settings = getDropoffSettings(node.id);
     const configHtml = `
@@ -1763,11 +1763,18 @@ const itemStatusPanel = {
         <div><input type="number" min="1" step="1" value="${settings.removalInterval}" data-dropoff-id="${escapeHtml(node.id)}" data-config-key="removalInterval"><span class="unit">s</span></div>
       </div>
     `;
-    return this._renderCard(node.label, `待機台車：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
+    return this._renderCard(this._getNodePanelLabel(node, index), `待機台車：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
   },
 
-  _renderDefaultNodeCard(node) {
-    return this._renderCard(node.label, '（後で追加）', '（後で追加）', { entityType: 'node', entityId: node.id });
+  _renderDefaultNodeCard(node, index) {
+    return this._renderCard(this._getNodePanelLabel(node, index), '（後で追加）', '（後で追加）', { entityType: 'node', entityId: node.id });
+  },
+
+  _getNodePanelLabel(node, index) {
+    const names = { pickup: 'Pickup', dropoff: 'DropOff', home: 'Waiting Area' };
+    const hasNumberedPanelLabel = node.type === 'pickup' || node.type === 'dropoff' || node.type === 'home';
+    if (!hasNumberedPanelLabel) return node.label;
+    return `${names[node.type]} ${index + 1}`;
   },
 
   _renderAmrCard(amr) {
