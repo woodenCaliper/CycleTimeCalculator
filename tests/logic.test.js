@@ -47,23 +47,17 @@ test('simulationLogic.calculateMoveState returns intermediate point when not rea
   assert.equal(moveState.direction, Math.atan2(4, 3));
 });
 
-test('renderLogic.getSegmentStyle resolves styles by priority', () => {
-  assert.deepEqual(renderLogic.getSegmentStyle({ isReserved: true, isLoop: true, isHome: true }), {
-    dash: [],
-    color: 'rgba(249,115,22,0.7)',
-    width: 4
-  });
-
-  assert.deepEqual(renderLogic.getSegmentStyle({ isReserved: false, isLoop: true, isHome: true }), {
+test('renderLogic.getSegmentStyle resolves styles by loop/non-loop', () => {
+  assert.deepEqual(renderLogic.getSegmentStyle({ isLoop: true }), {
     dash: [],
     color: 'rgba(74,222,128,0.7)',
     width: 2.5
   });
 
-  assert.deepEqual(renderLogic.getSegmentStyle({ isReserved: false, isLoop: false, isHome: true }), {
-    dash: [6, 4],
-    color: 'rgba(96,165,250,0.7)',
-    width: 2
+  assert.deepEqual(renderLogic.getSegmentStyle({ isLoop: false }), {
+    dash: [4, 4],
+    color: 'rgba(150,150,150,0.5)',
+    width: 1.5
   });
 });
 
