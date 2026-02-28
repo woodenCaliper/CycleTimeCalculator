@@ -811,12 +811,16 @@ const simEngine = {
     amr.syncBlockTimer += dt;
   },
 
-  _updateSyncAreaOccupancy(amr, x, y) {
+  _shouldForceSyncPass(amr) {
+    return amr.syncBlockTimer >= 10;
+  },
+
+  _updateSyncAreaOccupancy(amr, x, y, force = false) {
     for (const area of state.syncAreas) {
       if (area.points.length < 3) continue;
       const inside = pointInPolygon(x, y, area.points);
       if (inside) {
-        if (!area.occupantAmrId) area.occupantAmrId = amr.id;
+        if (force || !area.occupantAmrId) area.occupantAmrId = amr.id;
       } else if (area.occupantAmrId === amr.id) {
         area.occupantAmrId = null;
       }
@@ -1103,14 +1107,16 @@ const simEngine = {
       const blockingArea = this._getBlockingSyncArea(amr, target.x, target.y);
       if (blockingArea) {
         this._handleSyncAreaBlocked(amr, dt, blockingArea);
-        this._handleMovementStall(amr, dt, nextState);
-        return;
+        if (!this._shouldForceSyncPass(amr)) {
+          this._handleMovementStall(amr, dt, nextState);
+          return;
+        }
       }
       // ノード到着
       amr.x = target.x;
       amr.y = target.y;
       amr.syncBlockTimer = 0;
-      this._updateSyncAreaOccupancy(amr, amr.x, amr.y);
+      this._updateSyncAreaOccupancy(amr, amr.x, amr.y, !!blockingArea);
       amr.currentNodeId = targetId;
       collisionManager.release(amr.id, amr.currentSegment);
       amr.currentSegment = null;
@@ -1125,13 +1131,15 @@ const simEngine = {
       const blockingArea = this._getBlockingSyncArea(amr, moveState.nextX, moveState.nextY);
       if (blockingArea) {
         this._handleSyncAreaBlocked(amr, dt, blockingArea);
-        this._handleMovementStall(amr, dt, nextState);
-        return;
+        if (!this._shouldForceSyncPass(amr)) {
+          this._handleMovementStall(amr, dt, nextState);
+          return;
+        }
       }
       amr.x = moveState.nextX;
       amr.y = moveState.nextY;
       amr.syncBlockTimer = 0;
-      this._updateSyncAreaOccupancy(amr, amr.x, amr.y);
+      this._updateSyncAreaOccupancy(amr, amr.x, amr.y, !!blockingArea);
       amr.direction = moveState.direction;
     }
   },
@@ -1165,12 +1173,6 @@ const simEngine = {
     const toId = amr.currentPath[amr.pathIndex];
     const seg = graphManager.getSegmentBetween(fromId, toId);
     if (!seg || !graphManager.canTraverse(seg, fromId, toId)) { amr.pathIndex++; return; }
-
-    const targetNode = state.nodes.get(toId);
-    if (targetNode && this._getBlockingSyncArea(amr, targetNode.x, targetNode.y)) {
-      amr.currentSegment = null;
-      return;
-    }
 
     amr.currentSegment = seg.id;
     const target = state.nodes.get(toId);
