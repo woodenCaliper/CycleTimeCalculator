@@ -1208,14 +1208,16 @@ const renderer = {
     for (const area of state.syncAreas) {
       if (area.points.length < 3) continue;
       const areaStyle = renderLogic.getSyncAreaStyle(!!area.occupantAmrId);
+      const highlighted = state.ui.highlighted;
+      const isSelected = highlighted.type === 'sync-area' && highlighted.id === area.id;
       ctx.beginPath();
       ctx.moveTo(area.points[0].x, area.points[0].y);
       for (let i = 1; i < area.points.length; i++) ctx.lineTo(area.points[i].x, area.points[i].y);
       ctx.closePath();
       ctx.fillStyle = areaStyle.fill;
       ctx.fill();
-      ctx.strokeStyle = areaStyle.stroke;
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = isSelected ? '#facc15' : areaStyle.stroke;
+      ctx.lineWidth = isSelected ? 3 : 2;
       ctx.setLineDash([8, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -1498,7 +1500,8 @@ const itemStatusPanel = {
     pickup: true,
     dropoff: true,
     amr: true,
-    home: true
+    home: true,
+    syncArea: true
   },
 
   init() {
@@ -1566,6 +1569,7 @@ const itemStatusPanel = {
     const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
     const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
     const waitingAreas = [...state.nodes.values()].filter(n => n.type === 'home');
+    const syncAreas = state.syncAreas.map(area => ({ ...area }));
     const amrs = state.amrs.length > 0
       ? [...state.amrs]
       : waitingAreas.map((home, index) => simulationLogic.createInitialAmr(home, index));
@@ -1574,7 +1578,8 @@ const itemStatusPanel = {
       this._renderGroup('pickup', 'Pickup Station', pickups, node => this._renderPickupCard(node), 'Pickup Station は未配置です'),
       this._renderGroup('dropoff', 'Drop Off Station', dropoffs, node => this._renderDefaultNodeCard(node), 'Drop Off Station は未配置です'),
       this._renderGroup('amr', 'AMR', amrs, amr => this._renderAmrCard(amr), 'AMR は未生成です'),
-      this._renderGroup('home', 'Waiting Area', waitingAreas, node => this._renderDefaultNodeCard(node), 'Waiting Area は未配置です')
+      this._renderGroup('home', 'Waiting Area', waitingAreas, node => this._renderDefaultNodeCard(node), 'Waiting Area は未配置です'),
+      this._renderGroup('syncArea', 'Sync Area', syncAreas, area => this._renderSyncAreaCard(area), 'Sync Area は未配置です')
     ].join('');
 
     groupsEl.innerHTML = html;
@@ -1624,6 +1629,17 @@ const itemStatusPanel = {
   _renderAmrCard(amr) {
     const stateLabel = simulationLogic.getAmrStateLabel(amr.state);
     return this._renderCard(amr.label, `状態：${stateLabel}`, '（後で追加）', { entityType: 'amr', entityId: amr.id });
+  },
+
+  _renderSyncAreaCard(area) {
+    const occupantLabel = this._getSyncAreaOccupancyLabel(area.occupantAmrId);
+    return this._renderCard(area.id, `占有状態:${occupantLabel}`, '（後で追加）', { entityType: 'sync-area', entityId: area.id });
+  },
+
+  _getSyncAreaOccupancyLabel(occupantAmrId) {
+    if (!occupantAmrId) return '未占有';
+    const amr = state.amrs.find(candidate => candidate.id === occupantAmrId);
+    return amr ? `${amr.label}が占有` : `${occupantAmrId}が占有`;
   },
 
   _renderCard(title, statusLine, configLine, meta = {}) {
