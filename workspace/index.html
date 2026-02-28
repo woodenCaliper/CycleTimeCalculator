@@ -156,13 +156,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 #notification.info { border-color: #4fc3f7; color: #4fc3f7; }
 #notification.success { border-color: #22c55e; color: #22c55e; }
 
-/* ===== Canvas Overlay Stats ===== */
-#overlay-stats { position: absolute; bottom: 10px; right: 10px; background: rgba(22,33,62,0.9); border: 1px solid #0f3460; border-radius: 6px; padding: 8px 12px; font-size: 11px; min-width: 220px; pointer-events: none; }
-#overlay-stats .os-title { font-weight: 700; color: #e94560; margin-bottom: 4px; }
-#overlay-stats .os-row { display: flex; justify-content: space-between; margin-bottom: 2px; }
-#overlay-stats .os-label { color: #aaa; }
-#overlay-stats .os-value { color: #4fc3f7; font-weight: 600; }
-
 /* ===== Tooltip ===== */
 [data-tooltip] { position: relative; }
 #left-pane.collapsed [data-tooltip]:hover::after { content: attr(data-tooltip); position: absolute; left: 44px; top: 50%; transform: translateY(-50%); background: #16213e; border: 1px solid #0f3460; color: #e0e0e0; padding: 4px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; z-index: 100; pointer-events: none; }
@@ -258,10 +251,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <div id="item-status-groups"></div>
     </div>
     <div id="notification"></div>
-    <div id="overlay-stats" style="display:none;">
-      <div class="os-title">AMR 詳細</div>
-      <div id="overlay-amr-stats"></div>
-    </div>
     <div id="context-menu">
       <div class="cm-item" data-action="delete">削除</div>
     </div>
@@ -2270,9 +2259,8 @@ const uiController = {
     document.getElementById('stat-avg-ct').textContent = summaryStats.avgCtText;
     document.getElementById('stat-throughput').textContent = summaryStats.throughputText;
 
-    let detailHtml = '', overlayHtml = '';
+    let detailHtml = '';
     if (state.amrs.length > 0) {
-      document.getElementById('overlay-stats').style.display = 'block';
       for (const amr of state.amrs) {
         const amrRecords = validRecords.filter(r => r.amrId === amr.id);
         const avgCT = amrRecords.length > 0
@@ -2282,14 +2270,10 @@ const uiController = {
         const stateJa = simulationLogic.getAmrStateLabel(amr.state);
         const line = `${amr.label}[${stateJa}]: ${amr.taskCount}回 / 平均${avgCT}s / 待機${waitPct}%`;
         detailHtml += `<div class="amr-stat">${line}</div>`;
-        overlayHtml += `<div class="os-row"><span class="os-label">${amr.label}</span><span class="os-value">${amr.taskCount}回 ${avgCT}s 待${waitPct}%</span></div>`;
       }
       detailHtml += `<div class="amr-stat">供給中の台車数: ${pickupTotal} 台</div>`;
-    } else {
-      document.getElementById('overlay-stats').style.display = 'none';
     }
     document.getElementById('stats-detail').innerHTML = detailHtml;
-    document.getElementById('overlay-amr-stats').innerHTML = overlayHtml;
     itemStatusPanel.render();
   }
 };
