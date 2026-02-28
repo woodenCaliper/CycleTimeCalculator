@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-02-28T17:25:49.936Z",
+  "config": {
+    "scale": 0.1,
+    "amrSpeed": 1,
+    "dockingTime": 30,
+    "releaseTime": 20,
+    "simSpeed": 20,
+    "ffSpeed": 20
+  },
+  "counters": {
+    "nodeCounter": 8,
+    "segCounter": 6,
+    "syncAreaCounter": 2
+  },
+  "backgroundImageDataUrl": null,
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "pickup",
+      "x": 268,
+      "y": 250,
+      "label": "Pickup A"
+    },
+    {
+      "id": "n2",
+      "type": "pickup",
+      "x": 268,
+      "y": 407,
+      "label": "Pickup B"
+    },
+    {
+      "id": "n3",
+      "type": "dropoff",
+      "x": 552,
+      "y": 295,
+      "label": "DropOff A"
+    },
+    {
+      "id": "n4",
+      "type": "waypoint",
+      "x": 406,
+      "y": 336,
+      "label": "WP A"
+    },
+    {
+      "id": "n5",
+      "type": "home",
+      "x": 407,
+      "y": 253,
+      "label": "Waiting Area A"
+    },
+    {
+      "id": "n7",
+      "type": "home",
+      "x": 360,
+      "y": 251,
+      "label": "Waiting Area C"
+    },
+    {
+      "id": "n8",
+      "type": "home",
+      "x": 367,
+      "y": 412,
+      "label": "Waiting Area D"
+    }
+  ],
+  "segments": [
+    {
+      "id": "s1",
+      "from": "n1",
+      "to": "n4",
+      "distance": 16.260381299342278
+    },
+    {
+      "id": "s2",
+      "from": "n4",
+      "to": "n3",
+      "distance": 15.164761785138598
+    },
+    {
+      "id": "s3",
+      "from": "n7",
+      "to": "n4",
+      "distance": 9.664884893261792
+    },
+    {
+      "id": "s4",
+      "from": "n4",
+      "to": "n8",
+      "distance": 8.542247947700886
+    },
+    {
+      "id": "s5",
+      "from": "n2",
+      "to": "n4",
+      "distance": 15.519342769589182
+    },
+    {
+      "id": "s6",
+      "from": "n4",
+      "to": "n5",
+      "distance": 8.300602387778854
+    }
+  ],
+  "loopSegments": [
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6"
+  ],
+  "loopOrder": [
+    "n1",
+    "n4",
+    "n3"
+  ],
+  "syncAreas": [
+    {
+      "id": "sa1",
+      "points": [
+        {
+          "x": 350,
+          "y": 335
+        },
+        {
+          "x": 428,
+          "y": 288
+        },
+        {
+          "x": 444,
+          "y": 366
+        }
+      ]
+    },
+    {
+      "id": "sa2",
+      "points": [
+        {
+          "x": 504,
+          "y": 288
+        },
+        {
+          "x": 551,
+          "y": 365
+        },
+        {
+          "x": 601,
+          "y": 255
+        }
+      ]
+    }
+  ],
+  "pickupSettings": [
+    {
+      "id": "n1",
+      "supplyInterval": 120,
+      "capacity": 10
+    },
+    {
+      "id": "n2",
+      "supplyInterval": 60,
+      "capacity": 1
+    }
+  ]
+}
