@@ -144,7 +144,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <div class="param-row"><label>速度</label><div><input type="number" id="param-speed" value="1.0" min="0.1" max="5" step="0.1"><span class="unit">m/s</span></div></div>
       <div class="param-row"><label>ドッキング</label><div><input type="number" id="param-docking" value="30" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>リリース</label><div><input type="number" id="param-release" value="20" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
-      <div class="param-row"><label>AMR台数</label><div><input type="number" id="param-amr-count" value="1" min="1" max="10" step="1"><span class="unit">台</span></div></div>
       <div class="param-row"><label>Pickup供給周期</label><div><input type="number" id="param-pickup-interval" value="20" min="1" max="600" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>スケール</label><div><input type="number" id="param-scale" value="0.1" min="0.001" max="10" step="0.001"><span class="unit">m/px</span></div></div>
     </div>
@@ -218,7 +217,6 @@ const state = {
     amrSpeed: 1.0,
     dockingTime: 30,
     releaseTime: 20,
-    amrCount: 1,
     pickupSupplyInterval: 20,
     simSpeed: 1,
     ffSpeed: 3
@@ -802,10 +800,9 @@ const simEngine = {
     for (const area of state.syncAreas) area.occupantAmrId = null;
 
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
-    const count = Math.min(state.config.amrCount, 10, homes.length);
 
-    for (let i = 0; i < count; i++) {
-      const home = homes[i % homes.length];
+    for (let i = 0; i < homes.length; i++) {
+      const home = homes[i];
       if (!home) continue;
       state.amrs.push(simulationLogic.createInitialAmr(home, i));
     }
@@ -1782,7 +1779,6 @@ const uiController = {
     document.getElementById('param-speed').addEventListener('change', e => { state.config.amrSpeed = parseFloat(e.target.value) || 1.0; });
     document.getElementById('param-docking').addEventListener('change', e => { state.config.dockingTime = parseFloat(e.target.value) || 30; });
     document.getElementById('param-release').addEventListener('change', e => { state.config.releaseTime = parseFloat(e.target.value) || 20; });
-    document.getElementById('param-amr-count').addEventListener('change', e => { state.config.amrCount = Math.min(10, Math.max(1, parseInt(e.target.value) || 1)); });
     document.getElementById('param-pickup-interval').addEventListener('change', e => {
       state.config.pickupSupplyInterval = Math.max(1, parseFloat(e.target.value) || 20);
       e.target.value = state.config.pickupSupplyInterval;
