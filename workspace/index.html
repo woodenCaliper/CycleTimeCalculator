@@ -127,14 +127,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <button class="tool-btn" data-tool="sync-area" data-tooltip="SyncArea作成"><span class="tool-icon" style="color:#facc15">⬠</span><span class="tool-label">SyncArea作成</span></button>
       <button class="tool-btn" data-tool="delete" data-tooltip="削除"><span class="tool-icon">🗑</span><span class="tool-label">削除</span></button>
       <button class="tool-btn" data-tool="scale" data-tooltip="スケール設定"><span class="tool-icon">📏</span><span class="tool-label">スケール設定</span></button>
-      <div class="param-row" style="margin-top:8px;">
-        <label for="segment-direction">経路属性</label>
-        <select id="segment-direction">
-          <option value="bidirectional">A↔B（両通行）</option>
-          <option value="forward">A→B（片方向）</option>
-          <option value="reverse">B→A（片方向）</option>
-        </select>
-      </div>
     </div>
 
     <!-- Parameters Section -->
@@ -223,7 +215,6 @@ const state = {
   nodeCounter: 0,
   segCounter: 0,
   syncAreaCounter: 0,
-  segmentDirectionMode: 'bidirectional',
   simTime: 0,
   running: false,
   paused: false,
@@ -393,18 +384,18 @@ const graphManager = {
     // 重複チェック
     if (this.getSegmentBetween(fromId, toId)) return { ok: false, msg: 'すでにセグメントが存在します' };
 
-    const seg = this._createSegment(fromId, toId, state.segmentDirectionMode);
+    const seg = this._createSegment(fromId, toId);
     state.loopSegments.add(seg.id);
     this._rebuildLoopOrder();
     return { ok: true, seg };
   },
 
 
-  _createSegment(fromId, toId, direction = 'bidirectional') {
+  _createSegment(fromId, toId) {
     const id = 's' + (++state.segCounter);
     const nf = state.nodes.get(fromId), nt = state.nodes.get(toId);
     const dx = nt.x - nf.x, dy = nt.y - nf.y;
-    const seg = { id, from: fromId, to: toId, direction, distance: Math.sqrt(dx*dx + dy*dy) * state.config.scale };
+    const seg = { id, from: fromId, to: toId, distance: Math.sqrt(dx*dx + dy*dy) * state.config.scale };
     state.segments.set(id, seg);
     state.adjacency.get(fromId).add(toId);
     state.adjacency.get(toId).add(fromId);
@@ -413,12 +404,7 @@ const graphManager = {
 
   canTraverse(seg, fromId, toId) {
     if (!seg) return false;
-    if (seg.direction === 'bidirectional') {
-      return (seg.from === fromId && seg.to === toId) || (seg.from === toId && seg.to === fromId);
-    }
-    if (seg.direction === 'forward') return seg.from === fromId && seg.to === toId;
-    if (seg.direction === 'reverse') return seg.from === toId && seg.to === fromId;
-    return false;
+    return (seg.from === fromId && seg.to === toId) || (seg.from === toId && seg.to === fromId);
   },
 
   removeSegment(id) {
@@ -1177,13 +1163,6 @@ const renderer = {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      if (seg.direction !== 'bidirectional') {
-        const isForward = seg.direction === 'forward';
-        const fromNode = isForward ? a : b;
-        const toNode = isForward ? b : a;
-        this._drawDirectionArrow(fromNode.x, fromNode.y, toNode.x, toNode.y, isReserved ? '#fb923c' : '#f8fafc');
-      }
-
       // 距離ラベル
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       ctx.fillStyle = isLoop ? '#86efac' : '#aaa';
@@ -1271,27 +1250,6 @@ const renderer = {
     }
   },
 
-  _drawDirectionArrow(ax, ay, bx, by, color) {
-    const dx = bx - ax, dy = by - ay;
-    const len = Math.hypot(dx, dy);
-    if (len < 16) return;
-    const ux = dx / len, uy = dy / len;
-    const arrowLen = 10;
-    const arrowWidth = 5;
-    const tipX = ax + dx * 0.58;
-    const tipY = ay + dy * 0.58;
-    const baseX = tipX - ux * arrowLen;
-    const baseY = tipY - uy * arrowLen;
-    const px = -uy, py = ux;
-
-    ctx.beginPath();
-    ctx.moveTo(tipX, tipY);
-    ctx.lineTo(baseX + px * arrowWidth, baseY + py * arrowWidth);
-    ctx.lineTo(baseX - px * arrowWidth, baseY - py * arrowWidth);
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-  },
 
   _drawNode(n) {
     ctx.save();
@@ -1619,10 +1577,6 @@ document.getElementById('scale-ok').addEventListener('click', () => {
   document.getElementById('scale-modal').style.display = 'none';
 });
 
-document.getElementById('segment-direction').addEventListener('change', e => {
-  state.segmentDirectionMode = e.target.value;
-  showNotif(`経路属性を ${e.target.selectedOptions[0].textContent} に設定しました`, 'info');
-});
 document.getElementById('scale-cancel').addEventListener('click', () => {
   document.getElementById('scale-modal').style.display = 'none';
 });
