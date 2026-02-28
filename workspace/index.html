@@ -1503,10 +1503,21 @@ const itemStatusPanel = {
     home: true,
     syncArea: true
   },
+  interactionLockUntil: 0,
 
   init() {
     const groupsEl = document.getElementById('item-status-groups');
+    const paneEl = document.getElementById('item-status-pane');
+    if (paneEl) {
+      const keepInteractive = () => this._markInteracting();
+      paneEl.addEventListener('pointerdown', keepInteractive, { passive: true });
+      paneEl.addEventListener('wheel', keepInteractive, { passive: true });
+      paneEl.addEventListener('scroll', keepInteractive, { passive: true });
+      paneEl.addEventListener('focusin', keepInteractive);
+      paneEl.addEventListener('pointerenter', keepInteractive, { passive: true });
+    }
     groupsEl.addEventListener('toggle', e => {
+      this._markInteracting();
       const details = e.target;
       if (!(details instanceof HTMLDetailsElement)) return;
       const key = details.dataset.group;
@@ -1514,12 +1525,14 @@ const itemStatusPanel = {
       this.groupOpen[key] = details.open;
     }, true);
     groupsEl.addEventListener('click', e => {
+      this._markInteracting();
       if (e.target.closest('input, select, textarea, button')) return;
       const card = e.target.closest('.item-card[data-entity-type][data-entity-id]');
       if (!card) return;
       this.setHighlight(card.dataset.entityType, card.dataset.entityId);
     });
     groupsEl.addEventListener('change', e => {
+      this._markInteracting();
       const input = e.target;
       if (!(input instanceof HTMLInputElement)) return;
       const key = input.dataset.configKey;
@@ -1535,9 +1548,13 @@ const itemStatusPanel = {
         const supply = state.pickupSupply.get(pickupId);
         if (supply) supply.availableCarts = Math.min(supply.availableCarts, settings.capacity);
       }
-      this.render();
+      this.render({ force: true });
     });
-    this.render();
+    this.render({ force: true });
+  },
+
+  _markInteracting() {
+    this.interactionLockUntil = performance.now() + 350;
   },
 
   setHighlight(type, id) {
@@ -1547,12 +1564,13 @@ const itemStatusPanel = {
     } else {
       state.ui.highlighted = { type, id };
     }
-    this.render();
+    this.render({ force: true });
     renderer.render();
   },
 
 
-  render() {
+  render({ force = false } = {}) {
+    if (!force && performance.now() < this.interactionLockUntil) return;
     const groupsEl = document.getElementById('item-status-groups');
     if (!groupsEl) return;
 
