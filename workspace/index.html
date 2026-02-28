@@ -1449,7 +1449,8 @@ const renderer = {
         ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 1; ctx.stroke();
         break;
     }
-    if (n.type !== 'waypoint') {
+    const hiddenLabelTypes = new Set(['pickup', 'dropoff', 'home']);
+    if (n.type !== 'waypoint' && !hiddenLabelTypes.has(n.type)) {
       ctx.fillStyle = '#ddd'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(n.label, n.x, n.y - 16);
