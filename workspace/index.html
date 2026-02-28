@@ -1572,7 +1572,9 @@ const itemStatusPanel = {
     const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
     const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
     const waitingAreas = [...state.nodes.values()].filter(n => n.type === 'home');
-    const amrs = [...state.amrs];
+    const amrs = state.amrs.length > 0
+      ? [...state.amrs]
+      : waitingAreas.map((home, index) => simulationLogic.createInitialAmr(home, index));
 
     const html = [
       this._renderGroup('pickup', 'Pickup Station', pickups, node => this._renderPickupCard(node), 'Pickup Station は未配置です'),
