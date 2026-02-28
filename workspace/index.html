@@ -1435,6 +1435,16 @@ const renderer = {
         ctx.strokeRect(n.x - 10, n.y - 10, 20, 20);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText(this._getNodeIconText(n), n.x, n.y);
+        {
+          const carts = state.dropoffBuffer.get(n.id)?.waitingCarts ?? 0;
+          ctx.beginPath();
+          ctx.arc(n.x + 11, n.y - 11, 6, 0, Math.PI * 2);
+          ctx.fillStyle = carts > 0 ? '#fde047' : '#64748b';
+          ctx.fill();
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 8px sans-serif';
+          ctx.fillText(String(carts), n.x + 11, n.y - 11);
+        }
         break;
       case 'home':
         ctx.beginPath(); ctx.arc(n.x, n.y, 10, 0, Math.PI * 2);
@@ -1449,7 +1459,8 @@ const renderer = {
         ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 1; ctx.stroke();
         break;
     }
-    if (n.type !== 'waypoint') {
+    const hiddenLabelTypes = new Set(['pickup', 'dropoff', 'home']);
+    if (n.type !== 'waypoint' && !hiddenLabelTypes.has(n.type)) {
       ctx.fillStyle = '#ddd'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(n.label, n.x, n.y - 16);
