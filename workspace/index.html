@@ -460,7 +460,9 @@ const graphManager = {
     let count = 0;
     for (const n of state.nodes.values()) { if (n.type === type) count++; }
     const names = { pickup: 'Pickup', dropoff: 'DropOff', home: 'Waiting Area', waypoint: 'WP' };
-    return `${names[type]} ${String.fromCharCode(65 + count)}`;
+    const useNumericSequence = type === 'pickup' || type === 'dropoff' || type === 'home';
+    const suffix = useNumericSequence ? count + 1 : String.fromCharCode(65 + count);
+    return `${names[type]} ${suffix}`;
   },
 
   removeNode(id) {
