@@ -1498,6 +1498,7 @@ const itemStatusPanel = {
       this.groupOpen[key] = details.open;
     }, true);
     groupsEl.addEventListener('click', e => {
+      if (e.target.closest('input, select, textarea, button')) return;
       const card = e.target.closest('.item-card[data-entity-type][data-entity-id]');
       if (!card) return;
       this.setHighlight(card.dataset.entityType, card.dataset.entityId);
@@ -1533,6 +1534,7 @@ const itemStatusPanel = {
     this.render();
     renderer.render();
   },
+
 
   render() {
     const groupsEl = document.getElementById('item-status-groups');
@@ -2032,7 +2034,7 @@ const uiController = {
     }
     document.getElementById('stats-detail').innerHTML = detailHtml;
     document.getElementById('overlay-amr-stats').innerHTML = overlayHtml;
-    itemStatusPanel.render();
+    if (!state.running) itemStatusPanel.render();
   }
 };
 
