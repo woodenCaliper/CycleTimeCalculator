@@ -338,6 +338,28 @@ function parseCounterFromId(id, prefix) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function getSyncAreaDisplayLabel(area, fallbackIndex = 0) {
+  const rawLabel = typeof area?.label === 'string' ? area.label.trim() : '';
+  if (/^Sync Area\s*\d+$/i.test(rawLabel)) return rawLabel.replace(/\s+/g, ' ');
+
+  const rawId = typeof area?.id === 'string' ? area.id.trim() : '';
+  if (/^Sync Area\s*\d+$/i.test(rawId)) return rawId.replace(/\s+/g, ' ');
+
+  const saMatch = rawId.match(/^sa(\d+)$/i);
+  if (saMatch) return `Sync Area ${parseInt(saMatch[1], 10)}`;
+
+  const syncAreaMatch = rawId.match(/^sync_area_(\d+)$/i);
+  if (syncAreaMatch) return `Sync Area ${parseInt(syncAreaMatch[1], 10)}`;
+
+  return `Sync Area ${fallbackIndex + 1}`;
+}
+
+function parseSyncAreaCounter(area) {
+  const label = getSyncAreaDisplayLabel(area, 0);
+  const match = label.match(/(\d+)$/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
 function loadImageFromDataUrl(dataUrl) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -460,7 +482,9 @@ const graphManager = {
     let count = 0;
     for (const n of state.nodes.values()) { if (n.type === type) count++; }
     const names = { pickup: 'Pickup', dropoff: 'DropOff', home: 'Waiting Area', waypoint: 'WP' };
-    return `${names[type]} ${String.fromCharCode(65 + count)}`;
+    const useNumericSequence = type === 'pickup' || type === 'dropoff' || type === 'home';
+    const suffix = useNumericSequence ? count + 1 : String.fromCharCode(65 + count);
+    return `${names[type]} ${suffix}`;
   },
 
   removeNode(id) {
@@ -1299,7 +1323,8 @@ const renderer = {
       ctx.fillStyle = '#fde68a';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`SyncArea (${areaStyle.label})`, cx, cy);
+      const areaLabel = getSyncAreaDisplayLabel(area, 0);
+      ctx.fillText(`${areaLabel} (${areaStyle.label})`, cx, cy);
     }
 
     for (const seg of state.segments.values()) {
@@ -1701,10 +1726,10 @@ const itemStatusPanel = {
       : waitingAreas.map((home, index) => simulationLogic.createInitialAmr(home, index));
 
     const html = [
-      this._renderGroup('pickup', 'Pickup Station', pickups, node => this._renderPickupCard(node), 'Pickup Station は未配置です'),
-      this._renderGroup('dropoff', 'Drop Off Station', dropoffs, node => this._renderDropoffCard(node), 'Drop Off Station は未配置です'),
+      this._renderGroup('pickup', 'Pickup Station', pickups, (node, index) => this._renderPickupCard(node, index), 'Pickup Station は未配置です'),
+      this._renderGroup('dropoff', 'Drop Off Station', dropoffs, (node, index) => this._renderDropoffCard(node, index), 'Drop Off Station は未配置です'),
       this._renderGroup('amr', 'AMR', amrs, amr => this._renderAmrCard(amr), 'AMR は未生成です'),
-      this._renderGroup('home', 'Waiting Area', waitingAreas, node => this._renderDefaultNodeCard(node), 'Waiting Area は未配置です'),
+      this._renderGroup('home', 'Waiting Area', waitingAreas, (node, index) => this._renderDefaultNodeCard(node, index), 'Waiting Area は未配置です'),
       this._renderGroup('syncArea', 'Sync Area', syncAreas, area => this._renderSyncAreaCard(area), 'Sync Area は未配置です')
     ].join('');
 
@@ -1732,7 +1757,7 @@ const itemStatusPanel = {
     `;
   },
 
-  _renderPickupCard(node) {
+  _renderPickupCard(node, index) {
     const waitingCarts = state.pickupSupply.get(node.id)?.availableCarts ?? 0;
     const settings = getPickupSettings(node.id);
     const configHtml = `
@@ -1745,10 +1770,10 @@ const itemStatusPanel = {
         <div><input type="number" min="1" step="1" value="${settings.capacity}" data-pickup-id="${escapeHtml(node.id)}" data-config-key="capacity"><span class="unit">台</span></div>
       </div>
     `;
-    return this._renderCard(node.label, `待機台車数：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
+    return this._renderCard(this._getNodePanelLabel(node, index), `待機台車数：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
   },
 
-  _renderDropoffCard(node) {
+  _renderDropoffCard(node, index) {
     const waitingCarts = state.dropoffBuffer.get(node.id)?.waitingCarts ?? 0;
     const settings = getDropoffSettings(node.id);
     const configHtml = `
@@ -1761,11 +1786,18 @@ const itemStatusPanel = {
         <div><input type="number" min="1" step="1" value="${settings.removalInterval}" data-dropoff-id="${escapeHtml(node.id)}" data-config-key="removalInterval"><span class="unit">s</span></div>
       </div>
     `;
-    return this._renderCard(node.label, `待機台車：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
+    return this._renderCard(this._getNodePanelLabel(node, index), `待機台車：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
   },
 
-  _renderDefaultNodeCard(node) {
-    return this._renderCard(node.label, '（後で追加）', '（後で追加）', { entityType: 'node', entityId: node.id });
+  _renderDefaultNodeCard(node, index) {
+    return this._renderCard(this._getNodePanelLabel(node, index), '（後で追加）', '（後で追加）', { entityType: 'node', entityId: node.id });
+  },
+
+  _getNodePanelLabel(node, index) {
+    const names = { pickup: 'Pickup', dropoff: 'DropOff', home: 'Waiting Area' };
+    const hasNumberedPanelLabel = node.type === 'pickup' || node.type === 'dropoff' || node.type === 'home';
+    if (!hasNumberedPanelLabel) return node.label;
+    return `${names[node.type]} ${index + 1}`;
   },
 
   _renderAmrCard(amr) {
@@ -1775,7 +1807,7 @@ const itemStatusPanel = {
 
   _renderSyncAreaCard(area) {
     const occupantLabel = this._getSyncAreaOccupancyLabel(area.occupantAmrId);
-    return this._renderCard(area.id, `占有状態:${occupantLabel}`, '（後で追加）', { entityType: 'sync-area', entityId: area.id });
+    return this._renderCard(getSyncAreaDisplayLabel(area, 0), `占有状態:${occupantLabel}`, '（後で追加）', { entityType: 'sync-area', entityId: area.id });
   },
 
   _getSyncAreaOccupancyLabel(occupantAmrId) {
@@ -1953,8 +1985,10 @@ const inputHandler = {
     const start = this.syncAreaPoints[0];
     const isClose = Math.hypot(pos.x - start.x, pos.y - start.y) <= 12;
     if (isClose && this.syncAreaPoints.length >= 3) {
+      state.syncAreaCounter += 1;
       state.syncAreas.push({
-        id: 'sa' + (++state.syncAreaCounter),
+        id: 'sync_area_' + state.syncAreaCounter,
+        label: `Sync Area ${state.syncAreaCounter}`,
         points: [...this.syncAreaPoints],
         occupantAmrId: null
       });
@@ -2069,6 +2103,7 @@ const persistenceManager = {
       loopOrder: [...state.loopOrder],
       syncAreas: state.syncAreas.map(area => ({
         id: area.id,
+        label: getSyncAreaDisplayLabel(area, 0),
         points: area.points.map(pt => ({ x: pt.x, y: pt.y }))
       })),
       pickupSettings: [...state.pickupSettings.entries()].map(([id, settings]) => ({
@@ -2142,8 +2177,9 @@ const persistenceManager = {
     const syncAreas = Array.isArray(snapshot.syncAreas) ? snapshot.syncAreas : [];
     state.syncAreas = syncAreas
       .filter(area => area && typeof area.id === 'string' && Array.isArray(area.points) && area.points.length >= 3)
-      .map(area => ({
+      .map((area, index) => ({
         id: area.id,
+        label: getSyncAreaDisplayLabel(area, index),
         points: area.points.map(pt => ({ x: Number(pt.x) || 0, y: Number(pt.y) || 0 })),
         occupantAmrId: null
       }));
@@ -2186,7 +2222,7 @@ const persistenceManager = {
     const importedCounters = snapshot.counters || {};
     const maxNodeCounter = [...state.nodes.keys()].reduce((max, id) => Math.max(max, parseCounterFromId(id, 'n')), 0);
     const maxSegCounter = [...state.segments.keys()].reduce((max, id) => Math.max(max, parseCounterFromId(id, 's')), 0);
-    const maxAreaCounter = state.syncAreas.reduce((max, area) => Math.max(max, parseCounterFromId(area.id, 'sa')), 0);
+    const maxAreaCounter = state.syncAreas.reduce((max, area) => Math.max(max, parseSyncAreaCounter(area)), 0);
     state.nodeCounter = Math.max(maxNodeCounter, Number(importedCounters.nodeCounter) || 0);
     state.segCounter = Math.max(maxSegCounter, Number(importedCounters.segCounter) || 0);
     state.syncAreaCounter = Math.max(maxAreaCounter, Number(importedCounters.syncAreaCounter) || 0);
