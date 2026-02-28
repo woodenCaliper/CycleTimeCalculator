@@ -130,6 +130,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 
 .item-card {
   border: 1px solid #1a4a8a;
+  cursor: pointer;
   border-radius: 6px;
   background: rgba(15, 52, 96, 0.45);
   padding: 8px;
@@ -143,6 +144,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .item-card-group-label { font-size: 11px; color: #e94560; margin-bottom: 3px; }
 .item-card-line { font-size: 12px; color: #d8d8d8; line-height: 1.4; }
 .item-card-empty { font-size: 12px; color: #9ca3af; padding: 4px 0; }
+.item-card.selected { border-color: #facc15; box-shadow: 0 0 0 1px rgba(250,204,21,0.45) inset; background: rgba(59,130,246,0.2); }
 
 /* ===== Notification ===== */
 #notification { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(22,33,62,0.95); border: 1px solid #e94560; border-radius: 6px; padding: 6px 14px; font-size: 12px; color: #e94560; display: none; z-index: 150; pointer-events: none; max-width: 340px; text-align: center; }
@@ -301,7 +303,10 @@ const state = {
   paused: false,
   totalDeliveries: 0,
   cycleRecords: [],
-  pickupSupply: new Map()
+  pickupSupply: new Map(),
+  ui: {
+    highlighted: { type: null, id: null }
+  }
 };
 
 // ============================================================
@@ -1355,6 +1360,18 @@ const renderer = {
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(n.label, n.x, n.y - 16);
     }
+
+    const highlighted = state.ui.highlighted;
+    if (highlighted.type === 'node' && highlighted.id === n.id) {
+      const radius = n.type === 'waypoint' ? 10 : 16;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     ctx.restore();
   },
 
@@ -1406,6 +1423,17 @@ const renderer = {
       ctx.fillStyle = '#4fc3f7'; ctx.font = '8px sans-serif';
       ctx.fillText(stateText, amr.x, amr.y + 18);
     }
+
+    const highlighted = state.ui.highlighted;
+    if (highlighted.type === 'amr' && highlighted.id === amr.id) {
+      ctx.beginPath();
+      ctx.arc(amr.x, amr.y, 14, 0, Math.PI * 2);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 };
 
@@ -1451,7 +1479,23 @@ const itemStatusPanel = {
       if (!key) return;
       this.groupOpen[key] = details.open;
     }, true);
+    groupsEl.addEventListener('click', e => {
+      const card = e.target.closest('.item-card[data-entity-type][data-entity-id]');
+      if (!card) return;
+      this.setHighlight(card.dataset.entityType, card.dataset.entityId);
+    });
     this.render();
+  },
+
+  setHighlight(type, id) {
+    const cur = state.ui.highlighted;
+    if (cur.type === type && cur.id === id) {
+      state.ui.highlighted = { type: null, id: null };
+    } else {
+      state.ui.highlighted = { type, id };
+    }
+    this.render();
+    renderer.render();
   },
 
   render() {
@@ -1488,21 +1532,26 @@ const itemStatusPanel = {
 
   _renderPickupCard(node) {
     const waitingCarts = state.pickupSupply.get(node.id)?.availableCarts ?? 0;
-    return this._renderCard(node.label, `待機台車数：${waitingCarts}`, '（後で追加）');
+    return this._renderCard(node.label, `待機台車数：${waitingCarts}`, '（後で追加）', { entityType: 'node', entityId: node.id });
   },
 
   _renderDefaultNodeCard(node) {
-    return this._renderCard(node.label, '（後で追加）', '（後で追加）');
+    return this._renderCard(node.label, '（後で追加）', '（後で追加）', { entityType: 'node', entityId: node.id });
   },
 
   _renderAmrCard(amr) {
     const stateLabel = simulationLogic.getAmrStateLabel(amr.state);
-    return this._renderCard(amr.label, `状態：${stateLabel}`, '（後で追加）');
+    return this._renderCard(amr.label, `状態：${stateLabel}`, '（後で追加）', { entityType: 'amr', entityId: amr.id });
   },
 
-  _renderCard(title, statusLine, configLine) {
+  _renderCard(title, statusLine, configLine, meta = {}) {
+    const highlighted = state.ui.highlighted;
+    const isSelected = highlighted.type === meta.entityType && highlighted.id === meta.entityId;
+    const selectedClass = isSelected ? ' selected' : '';
+    const entityType = escapeHtml(meta.entityType || '');
+    const entityId = escapeHtml(meta.entityId || '');
     return `
-      <div class="item-card">
+      <div class="item-card${selectedClass}" data-entity-type="${entityType}" data-entity-id="${entityId}">
         <div class="item-card-title">${escapeHtml(title)}</div>
         <div class="item-card-group">
           <div class="item-card-group-label">状態</div>
