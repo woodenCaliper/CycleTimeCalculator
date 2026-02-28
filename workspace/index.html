@@ -301,6 +301,8 @@ const state = {
   cycleRecords: [],
   pickupSupply: new Map(),
   pickupSettings: new Map(),
+  dropoffBuffer: new Map(),
+  dropoffSettings: new Map(),
   ui: {
     highlighted: { type: null, id: null }
   }
@@ -450,6 +452,7 @@ const graphManager = {
     state.nodes.set(id, node);
     state.adjacency.set(id, new Set());
     if (type === 'pickup') getPickupSettings(id);
+    if (type === 'dropoff') getDropoffSettings(id);
     return node;
   },
 
@@ -470,6 +473,9 @@ const graphManager = {
     for (const adj of state.adjacency.values()) adj.delete(id);
     state.nodes.delete(id);
     state.pickupSettings.delete(id);
+    state.pickupSupply.delete(id);
+    state.dropoffSettings.delete(id);
+    state.dropoffBuffer.delete(id);
     this._rebuildLoopOrder();
   },
 
@@ -694,7 +700,7 @@ const pathfinder = {
   // ループ部でのDropOff探索（最近傍）
   findNearestDropoffOnLoop(startId) {
     const targets = [...state.nodes.values()]
-      .filter(n => n.type === 'dropoff')
+      .filter(n => n.type === 'dropoff' && simEngine._canAcceptDropoffCart(n.id))
       .map(n => n.id);
     if (!targets.length) return null;
     return this.findLoopPath(startId, targets);
@@ -751,6 +757,18 @@ const simEngine = {
     }
   },
 
+  _initDropoffBuffer() {
+    state.dropoffBuffer.clear();
+    const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
+    for (const dropoff of dropoffs) {
+      const settings = getDropoffSettings(dropoff.id);
+      state.dropoffBuffer.set(dropoff.id, {
+        waitingCarts: 0,
+        nextRemovalTime: settings.removalInterval
+      });
+    }
+  },
+
   _refreshPickupSupply() {
     for (const [pickupId, supply] of state.pickupSupply) {
       if (!state.nodes.has(pickupId)) {
@@ -764,6 +782,37 @@ const simEngine = {
         supply.nextSupplyTime += settings.supplyInterval;
       }
     }
+  },
+
+  _refreshDropoffBuffer() {
+    for (const [dropoffId, buffer] of state.dropoffBuffer) {
+      if (!state.nodes.has(dropoffId)) {
+        state.dropoffBuffer.delete(dropoffId);
+        continue;
+      }
+      const settings = getDropoffSettings(dropoffId);
+      if (buffer.waitingCarts > settings.capacity) buffer.waitingCarts = settings.capacity;
+      while (state.simTime >= buffer.nextRemovalTime) {
+        if (buffer.waitingCarts > 0) buffer.waitingCarts--;
+        buffer.nextRemovalTime += settings.removalInterval;
+      }
+    }
+  },
+
+  _canAcceptDropoffCart(dropoffId) {
+    const buffer = state.dropoffBuffer.get(dropoffId);
+    const settings = getDropoffSettings(dropoffId);
+    const waitingCarts = buffer?.waitingCarts ?? 0;
+    return waitingCarts < settings.capacity;
+  },
+
+  _storeDropoffCart(dropoffId) {
+    const buffer = state.dropoffBuffer.get(dropoffId);
+    const settings = getDropoffSettings(dropoffId);
+    if (!buffer) return false;
+    if (buffer.waitingCarts >= settings.capacity) return false;
+    buffer.waitingCarts++;
+    return true;
   },
 
   _hasCartAtPickup(pickupId) {
@@ -818,6 +867,7 @@ const simEngine = {
     state.totalDeliveries = 0;
     state.cycleRecords = [];
     this._initPickupSupply();
+    this._initDropoffBuffer();
     for (const area of state.syncAreas) area.occupantAmrId = null;
 
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
@@ -831,6 +881,7 @@ const simEngine = {
   update(dt) {
     state.simTime += dt;
     this._refreshPickupSupply();
+    this._refreshDropoffBuffer();
     for (const area of state.syncAreas) {
       if (area.occupantAmrId && !state.amrs.some(a => a.id === area.occupantAmrId)) area.occupantAmrId = null;
     }
@@ -962,6 +1013,11 @@ const simEngine = {
   _handleReleasing(amr, dt) {
     amr.waitTimer += dt;
     if (amr.waitTimer >= state.config.releaseTime) {
+      if (!this._storeDropoffCart(amr.currentNodeId)) {
+        amr.waitTimer = state.config.releaseTime;
+        amr.totalWaitingTime += dt;
+        return;
+      }
       amr.hasCargo = false;
       amr.waitTimer = 0;
       amr.taskCount++;
@@ -1089,6 +1145,13 @@ const simEngine = {
     const moveState = simulationLogic.calculateMoveState(amr, target, movePx);
 
     if (moveState.reached) {
+      const isFinalDropoff = nextState === 'releasing'
+        && amr.pathIndex === amr.currentPath.length - 1
+        && target.type === 'dropoff';
+      if (isFinalDropoff && !this._canAcceptDropoffCart(targetId)) {
+        this._handleMovementStall(amr, dt, nextState);
+        return;
+      }
       const blockingArea = this._getBlockingSyncArea(amr, target.x, target.y);
       if (blockingArea) {
         this._handleSyncAreaBlocked(amr, dt, blockingArea);
@@ -1481,6 +1544,17 @@ function getPickupSettings(pickupId) {
   return settings;
 }
 
+function getDropoffSettings(dropoffId) {
+  let settings = state.dropoffSettings.get(dropoffId);
+  if (!settings) {
+    settings = { capacity: 1, removalInterval: 120 };
+    state.dropoffSettings.set(dropoffId, settings);
+  }
+  settings.capacity = Math.max(1, Number(settings.capacity) || 1);
+  settings.removalInterval = Math.max(1, Number(settings.removalInterval) || 120);
+  return settings;
+}
+
 // ============================================================
 // UI - Right Item Status Panel
 // ============================================================
@@ -1526,16 +1600,30 @@ const itemStatusPanel = {
       if (!(input instanceof HTMLInputElement)) return;
       const key = input.dataset.configKey;
       const pickupId = input.dataset.pickupId;
-      if (!key || !pickupId) return;
-      const settings = getPickupSettings(pickupId);
-      if (key === 'supplyInterval') {
-        settings.supplyInterval = Math.max(1, Number(input.value) || 120);
-        input.value = String(settings.supplyInterval);
-      } else if (key === 'capacity') {
-        settings.capacity = Math.max(1, Number(input.value) || 1);
-        input.value = String(settings.capacity);
-        const supply = state.pickupSupply.get(pickupId);
-        if (supply) supply.availableCarts = Math.min(supply.availableCarts, settings.capacity);
+      const dropoffId = input.dataset.dropoffId;
+      if (!key) return;
+      if (pickupId) {
+        const settings = getPickupSettings(pickupId);
+        if (key === 'supplyInterval') {
+          settings.supplyInterval = Math.max(1, Number(input.value) || 120);
+          input.value = String(settings.supplyInterval);
+        } else if (key === 'capacity') {
+          settings.capacity = Math.max(1, Number(input.value) || 1);
+          input.value = String(settings.capacity);
+          const supply = state.pickupSupply.get(pickupId);
+          if (supply) supply.availableCarts = Math.min(supply.availableCarts, settings.capacity);
+        }
+      } else if (dropoffId) {
+        const settings = getDropoffSettings(dropoffId);
+        if (key === 'capacity') {
+          settings.capacity = Math.max(1, Number(input.value) || 1);
+          input.value = String(settings.capacity);
+          const buffer = state.dropoffBuffer.get(dropoffId);
+          if (buffer) buffer.waitingCarts = Math.min(buffer.waitingCarts, settings.capacity);
+        } else if (key === 'removalInterval') {
+          settings.removalInterval = Math.max(1, Number(input.value) || 120);
+          input.value = String(settings.removalInterval);
+        }
       }
       this.render({ force: true });
     });
@@ -1583,7 +1671,7 @@ const itemStatusPanel = {
 
     const html = [
       this._renderGroup('pickup', 'Pickup Station', pickups, node => this._renderPickupCard(node), 'Pickup Station は未配置です'),
-      this._renderGroup('dropoff', 'Drop Off Station', dropoffs, node => this._renderDefaultNodeCard(node), 'Drop Off Station は未配置です'),
+      this._renderGroup('dropoff', 'Drop Off Station', dropoffs, node => this._renderDropoffCard(node), 'Drop Off Station は未配置です'),
       this._renderGroup('amr', 'AMR', amrs, amr => this._renderAmrCard(amr), 'AMR は未生成です'),
       this._renderGroup('home', 'Waiting Area', waitingAreas, node => this._renderDefaultNodeCard(node), 'Waiting Area は未配置です'),
       this._renderGroup('syncArea', 'Sync Area', syncAreas, area => this._renderSyncAreaCard(area), 'Sync Area は未配置です')
@@ -1627,6 +1715,22 @@ const itemStatusPanel = {
       </div>
     `;
     return this._renderCard(node.label, `待機台車数：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
+  },
+
+  _renderDropoffCard(node) {
+    const waitingCarts = state.dropoffBuffer.get(node.id)?.waitingCarts ?? 0;
+    const settings = getDropoffSettings(node.id);
+    const configHtml = `
+      <div class="item-config-row">
+        <label>設置可能台車数</label>
+        <div><input type="number" min="1" step="1" value="${settings.capacity}" data-dropoff-id="${escapeHtml(node.id)}" data-config-key="capacity"><span class="unit">台</span></div>
+      </div>
+      <div class="item-config-row">
+        <label>台車除去周期[s]</label>
+        <div><input type="number" min="1" step="1" value="${settings.removalInterval}" data-dropoff-id="${escapeHtml(node.id)}" data-config-key="removalInterval"><span class="unit">s</span></div>
+      </div>
+    `;
+    return this._renderCard(node.label, `待機台車：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
   },
 
   _renderDefaultNodeCard(node) {
@@ -1940,6 +2044,11 @@ const persistenceManager = {
         id,
         supplyInterval: settings.supplyInterval,
         capacity: settings.capacity
+      })),
+      dropoffSettings: [...state.dropoffSettings.entries()].map(([id, settings]) => ({
+        id,
+        capacity: settings.capacity,
+        removalInterval: settings.removalInterval
       }))
     };
   },
@@ -1959,7 +2068,9 @@ const persistenceManager = {
     state.loopOrder = [];
     state.syncAreas = [];
     state.pickupSettings = new Map();
+    state.dropoffSettings = new Map();
     state.pickupSupply.clear();
+    state.dropoffBuffer.clear();
 
     for (const rawNode of snapshot.nodes) {
       if (!rawNode || typeof rawNode.id !== 'string') continue;
@@ -2019,6 +2130,18 @@ const persistenceManager = {
       if (node.type === 'pickup' && !state.pickupSettings.has(node.id)) {
         state.pickupSettings.set(node.id, { supplyInterval: 30, capacity: 1 });
       }
+      if (node.type === 'dropoff' && !state.dropoffSettings.has(node.id)) {
+        state.dropoffSettings.set(node.id, { capacity: 1, removalInterval: 120 });
+      }
+    }
+
+    const dropoffSettings = Array.isArray(snapshot.dropoffSettings) ? snapshot.dropoffSettings : [];
+    for (const entry of dropoffSettings) {
+      if (!entry || typeof entry.id !== 'string' || !state.nodes.has(entry.id)) continue;
+      state.dropoffSettings.set(entry.id, {
+        capacity: Math.max(1, Number(entry.capacity) || 1),
+        removalInterval: Math.max(1, Number(entry.removalInterval) || 120)
+      });
     }
 
     const cfg = snapshot.config || {};
@@ -2231,6 +2354,7 @@ const uiController = {
     state.cycleRecords = [];
     state.amrs = [];
     state.pickupSupply.clear();
+    state.dropoffBuffer.clear();
     for (const area of state.syncAreas) area.occupantAmrId = null;
     state.config.simSpeed = 1;
     state._lastSpeed = 1;
