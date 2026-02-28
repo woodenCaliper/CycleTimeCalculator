@@ -124,7 +124,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <button class="tool-btn" data-tool="home" data-tooltip="Home"><span class="tool-icon" style="color:#3b82f6">●</span><span class="tool-label">待機エリア</span></button>
       <button class="tool-btn" data-tool="waypoint" data-tooltip="Waypoint"><span class="tool-icon" style="color:#9ca3af">●</span><span class="tool-label">Waypoint</span></button>
       <button class="tool-btn" data-tool="loop-path" data-tooltip="経路作成"><span class="tool-icon" style="color:#4ade80">/</span><span class="tool-label">経路作成</span></button>
-      <button class="tool-btn" data-tool="home-branch" data-tooltip="Home枝接続"><span class="tool-icon" style="color:#60a5fa">⎇</span><span class="tool-label">Home枝接続</span></button>
       <button class="tool-btn" data-tool="sync-area" data-tooltip="SyncArea作成"><span class="tool-icon" style="color:#facc15">⬠</span><span class="tool-label">SyncArea作成</span></button>
       <button class="tool-btn" data-tool="delete" data-tooltip="削除"><span class="tool-icon">🗑</span><span class="tool-label">削除</span></button>
       <button class="tool-btn" data-tool="scale" data-tooltip="スケール設定"><span class="tool-icon">📏</span><span class="tool-label">スケール設定</span></button>
@@ -209,7 +208,6 @@ const state = {
   segments: new Map(),
   adjacency: new Map(),
   loopSegments: new Set(),      // ループ部セグメントID集合
-  homeSegments: new Set(),      // Home枝セグメントID集合
   loopOrder: [],                // ループ部ノードの順序配列
   syncAreas: [],                // 排他進入エリア [{id, points:[{x,y}], occupantAmrId}]
   amrs: [],
@@ -344,10 +342,9 @@ const simulationLogic = {
 };
 
 const renderLogic = {
-  getSegmentStyle({ isReserved, isLoop, isHome }) {
+  getSegmentStyle({ isReserved, isLoop }) {
     if (isReserved) return { dash: [], color: 'rgba(249,115,22,0.7)', width: 4 };
     if (isLoop) return { dash: [], color: 'rgba(74,222,128,0.7)', width: 2.5 };
-    if (isHome) return { dash: [6, 4], color: 'rgba(96,165,250,0.7)', width: 2 };
     return { dash: [4, 4], color: 'rgba(150,150,150,0.5)', width: 1.5 };
   },
 
@@ -404,29 +401,6 @@ const graphManager = {
     return { ok: true, seg };
   },
 
-  // Home枝セグメントを追加
-  addHomeSegment(loopNodeId, homeNodeId) {
-    const loopNode = state.nodes.get(loopNodeId);
-    const homeNode = state.nodes.get(homeNodeId);
-    if (!loopNode || !homeNode) return { ok: false, msg: 'ノードが見つかりません' };
-
-    // 型チェック
-    if (homeNode.type !== 'home') return { ok: false, msg: `${homeNode.label} はHomeノードではありません` };
-    const loopTypes = ['pickup', 'dropoff', 'waypoint'];
-    if (!loopTypes.includes(loopNode.type)) return { ok: false, msg: `接続元はPickup/DropOff/Waypointである必要があります` };
-
-    // Homeノードの次数チェック（リーフ必須）
-    if ((state.adjacency.get(homeNodeId) || new Set()).size > 0) {
-      return { ok: false, msg: `${homeNode.label} はすでに接続されています（リーフノード必須）` };
-    }
-
-    // 重複チェック
-    if (this.getSegmentBetween(loopNodeId, homeNodeId)) return { ok: false, msg: 'すでにセグメントが存在します' };
-
-    const seg = this._createSegment(loopNodeId, homeNodeId, state.segmentDirectionMode);
-    state.homeSegments.add(seg.id);
-    return { ok: true, seg };
-  },
 
   _createSegment(fromId, toId, direction = 'bidirectional') {
     const id = 's' + (++state.segCounter);
@@ -456,7 +430,6 @@ const graphManager = {
     state.adjacency.get(seg.to)?.delete(seg.from);
     state.segments.delete(id);
     state.loopSegments.delete(id);
-    state.homeSegments.delete(id);
     state.segmentReservation.delete(id);
     this._rebuildLoopOrder();
   },
@@ -605,38 +578,18 @@ const pathfinder = {
     return null;
   },
 
-  // Homeノードから目的ノードへのパス（Home枝→ループ→target）
+  // Homeノードから目的ノードへの最短パス
   findFromHome(homeId, targetIds) {
-    const homeAdj = [...(state.adjacency.get(homeId) || [])];
-    if (!homeAdj.length) return null;
-    const connectNode = homeAdj[0]; // ループ部へのゲートノード
-    const homeSeg = graphManager.getSegmentBetween(homeId, connectNode);
-    if (!homeSeg || !graphManager.canTraverse(homeSeg, homeId, connectNode)) return null;
-    const loopPath = this.findLoopPath(connectNode, targetIds);
-    if (!loopPath) return null;
-    if (loopPath[0] === homeId) return loopPath;
-    return [homeId, ...loopPath];
+    return this.findLoopPath(homeId, targetIds);
   },
 
-  // ループ部ノードから最寄りHomeへのパス（ループ→Home枝）
+  // 任意ノードから最寄りHomeへの最短パス
   findToHome(startId, excludeHomeIds = new Set()) {
-    const homes = [...state.nodes.values()].filter(n => n.type === 'home' && !excludeHomeIds.has(n.id));
-    if (!homes.length) return null;
-
-    let bestPath = null, bestDist = Infinity;
-    for (const home of homes) {
-      const homeAdj = [...(state.adjacency.get(home.id) || [])];
-      if (!homeAdj.length) continue;
-      const connectNode = homeAdj[0];
-      const homeSeg = graphManager.getSegmentBetween(connectNode, home.id);
-      if (!homeSeg || !graphManager.canTraverse(homeSeg, connectNode, home.id)) continue;
-      const loopPath = this.findLoopPath(startId, [connectNode]);
-      if (!loopPath) continue;
-      const fullPath = [...loopPath, home.id];
-      const dist = this._pathDistance(fullPath);
-      if (dist < bestDist) { bestDist = dist; bestPath = fullPath; }
-    }
-    return bestPath;
+    const targets = [...state.nodes.values()]
+      .filter(n => n.type === 'home' && !excludeHomeIds.has(n.id))
+      .map(n => n.id);
+    if (!targets.length) return null;
+    return this.findLoopPath(startId, targets);
   },
 
   // ループ部でのタスク探索（利用可能Pickupの最近傍）
@@ -1215,14 +1168,13 @@ const renderer = {
       if (!a || !b) continue;
 
       const isLoop = state.loopSegments.has(seg.id);
-      const isHome = state.homeSegments.has(seg.id);
       const isReserved = state.segmentReservation.has(seg.id);
 
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
 
-      const segmentStyle = renderLogic.getSegmentStyle({ isReserved, isLoop, isHome });
+      const segmentStyle = renderLogic.getSegmentStyle({ isReserved, isLoop });
       ctx.setLineDash(segmentStyle.dash);
       ctx.strokeStyle = segmentStyle.color;
       ctx.lineWidth = segmentStyle.width;
@@ -1238,7 +1190,7 @@ const renderer = {
 
       // 距離ラベル
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-      ctx.fillStyle = isLoop ? '#86efac' : (isHome ? '#93c5fd' : '#aaa');
+      ctx.fillStyle = isLoop ? '#86efac' : '#aaa';
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(seg.distance.toFixed(1) + 'm', mx, my - 6);
@@ -1266,20 +1218,6 @@ const renderer = {
       ctx.setLineDash([]);
     }
 
-    // Home枝作成プレビュー
-    if (ih.currentTool === 'home-branch' && ih.homeBranchSource) {
-      const src = state.nodes.get(ih.homeBranchSource);
-      if (src && ih.mouseX !== null) {
-        ctx.setLineDash([6, 4]);
-        ctx.strokeStyle = '#60a5fa';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(ih.mouseX, ih.mouseY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    }
 
     // スケール校正プレビュー
     if (ih.scalePoints.length === 1) {
@@ -1307,19 +1245,6 @@ const renderer = {
       this._drawAMR(amr);
     }
 
-    // Home枝接続: 選択中ノードのハイライト
-    if (ih.currentTool === 'home-branch' && ih.homeBranchSource) {
-      const src = state.nodes.get(ih.homeBranchSource);
-      if (src) {
-        ctx.beginPath();
-        ctx.arc(src.x, src.y, 18, 0, Math.PI * 2);
-        ctx.strokeStyle = '#60a5fa';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([3, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    }
 
     // ループ作成: 始点ハイライト
     if (ih.currentTool === 'loop-path' && ih.loopPathNodes.length > 0) {
@@ -1494,7 +1419,6 @@ const inputHandler = {
   currentTool: 'select',
   loopPathNodes: [],         // ループ作成中の選択ノード列
   loopPathSegIds: [],        // ループ作成中に追加したセグメントID列
-  homeBranchSource: null,    // Home枝接続の接続元ノードID
   syncAreaPoints: [],        // SyncArea作成中の頂点列
   scalePoints: [],
   draggingNode: null,
@@ -1531,9 +1455,6 @@ const inputHandler = {
       this.loopPathSegIds = [];
       showNotif('ループ作成をキャンセルしました', 'info');
       renderer.render();
-    } else if (this.currentTool === 'home-branch' && this.homeBranchSource) {
-      this.homeBranchSource = null;
-      renderer.render();
     } else if (this.currentTool === 'sync-area' && this.syncAreaPoints.length > 0) {
       this.syncAreaPoints = [];
       showNotif('SyncArea作成をキャンセルしました', 'info');
@@ -1554,8 +1475,6 @@ const inputHandler = {
       renderer.render();
     } else if (tool === 'loop-path') {
       this._handleLoopPathClick(pos);
-    } else if (tool === 'home-branch') {
-      this._handleHomeBranchClick(pos);
     } else if (tool === 'sync-area') {
       this._handleSyncAreaClick(pos);
     } else if (tool === 'delete') {
@@ -1624,38 +1543,6 @@ const inputHandler = {
 
     showNotif(`${node.label} を追加。継続してノード追加、または始点クリックで確定（現在${this.loopPathNodes.length}ノード）`, 'info');
     renderer.render();
-  },
-
-  _handleHomeBranchClick(pos) {
-    const node = graphManager.findNearNode(pos.x, pos.y);
-    if (!node) return;
-
-    if (!this.homeBranchSource) {
-      // 接続元選択（ループ部ノードのみ）
-      const loopTypes = ['pickup', 'dropoff', 'waypoint'];
-      if (!loopTypes.includes(node.type)) {
-        showNotif('接続元はPickup/DropOff/Waypointを選択してください', 'error');
-        return;
-      }
-      this.homeBranchSource = node.id;
-      showNotif(`接続元: ${node.label} を選択。Homeノードをクリックしてください`, 'info');
-      renderer.render();
-    } else {
-      // Homeノードを選択して接続
-      if (node.id === this.homeBranchSource) {
-        this.homeBranchSource = null;
-        renderer.render();
-        return;
-      }
-      const result = graphManager.addHomeSegment(this.homeBranchSource, node.id);
-      if (!result.ok) {
-        showNotif(result.msg, 'error');
-      } else {
-        showNotif(`Home枝を接続しました: ${state.nodes.get(this.homeBranchSource).label} → ${node.label}`, 'success');
-      }
-      this.homeBranchSource = null;
-      renderer.render();
-    }
   },
 
   _handleSyncAreaClick(pos) {
@@ -1760,7 +1647,6 @@ const uiController = {
         inputHandler.currentTool = tool;
         inputHandler.loopPathNodes = [];
         inputHandler.loopPathSegIds = [];
-        inputHandler.homeBranchSource = null;
         inputHandler.syncAreaPoints = [];
         inputHandler.scalePoints = [];
         this.updateToolButtons();
@@ -1833,7 +1719,7 @@ const uiController = {
     }
     const hasHomeWithBranch = homes.some(h => (state.adjacency.get(h.id) || new Set()).size > 0);
     if (!hasHomeWithBranch) {
-      showNotif('待機エリアをループ部に接続してください（Home枝接続ツール⎇を使用）', 'error');
+      showNotif('待機エリアを経路に接続してください（経路作成ツール / を使用）', 'error');
       return false;
     }
     const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
