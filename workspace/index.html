@@ -1231,6 +1231,26 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
 const renderer = {
+  _getNodeIndexByType(node) {
+    let index = 0;
+    for (const current of state.nodes.values()) {
+      if (current.type !== node.type) continue;
+      index++;
+      if (current.id === node.id) return index;
+    }
+    return index;
+  },
+
+  _getNodeIconText(node) {
+    const index = this._getNodeIndexByType(node);
+    switch (node.type) {
+      case 'pickup': return `P${index}`;
+      case 'dropoff': return `D${index}`;
+      case 'home': return `W${index}`;
+      default: return '';
+    }
+  },
+
   resize() {
     const rect = document.getElementById('right-pane').getBoundingClientRect();
     canvas.width = rect.width;
@@ -1396,7 +1416,7 @@ const renderer = {
         ctx.strokeStyle = '#166534'; ctx.lineWidth = 1.5;
         ctx.strokeRect(n.x - 10, n.y - 10, 20, 20);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText('P', n.x, n.y);
+        ctx.fillText(this._getNodeIconText(n), n.x, n.y);
         {
           const carts = state.pickupSupply.get(n.id)?.availableCarts ?? 0;
           ctx.beginPath();
@@ -1414,14 +1434,14 @@ const renderer = {
         ctx.strokeStyle = '#991b1b'; ctx.lineWidth = 1.5;
         ctx.strokeRect(n.x - 10, n.y - 10, 20, 20);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText('D', n.x, n.y);
+        ctx.fillText(this._getNodeIconText(n), n.x, n.y);
         break;
       case 'home':
         ctx.beginPath(); ctx.arc(n.x, n.y, 10, 0, Math.PI * 2);
         ctx.fillStyle = '#3b82f6'; ctx.fill();
         ctx.strokeStyle = '#1e40af'; ctx.lineWidth = 1.5; ctx.stroke();
         ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText('H', n.x, n.y);
+        ctx.fillText(this._getNodeIconText(n), n.x, n.y);
         break;
       case 'waypoint':
         ctx.beginPath(); ctx.arc(n.x, n.y, 5, 0, Math.PI * 2);
