@@ -1166,12 +1166,6 @@ const simEngine = {
     const seg = graphManager.getSegmentBetween(fromId, toId);
     if (!seg || !graphManager.canTraverse(seg, fromId, toId)) { amr.pathIndex++; return; }
 
-    const targetNode = state.nodes.get(toId);
-    if (targetNode && this._getBlockingSyncArea(amr, targetNode.x, targetNode.y)) {
-      amr.currentSegment = null;
-      return;
-    }
-
     amr.currentSegment = seg.id;
     const target = state.nodes.get(toId);
     if (target) amr.direction = Math.atan2(target.y - amr.y, target.x - amr.x);
