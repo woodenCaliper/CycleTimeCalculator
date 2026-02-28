@@ -857,7 +857,22 @@ const simEngine = {
     return reserved;
   },
 
+  _isWaitingAreaOccupied(excludeAmrId = null) {
+    return state.amrs.some(amr => {
+      if (excludeAmrId && amr.id === excludeAmrId) return false;
+      return amr.state === 'at_home' || !!amr.targetHomeId;
+    });
+  },
+
   _tryStartReturnHome(amr) {
+    if (this._isWaitingAreaOccupied(amr.id)) {
+      amr.state = 'returning_home';
+      amr.currentPath = null;
+      amr.pathIndex = 0;
+      amr.targetHomeId = null;
+      return false;
+    }
+
     const reservedHomes = this._getReservedHomes(amr.id);
     const homePath = pathfinder.findToHome(amr.currentNodeId, reservedHomes);
     if (!homePath || homePath.length === 0) {
@@ -877,6 +892,14 @@ const simEngine = {
   },
 
   _handleAtHome(amr) {
+    if (this._isWaitingAreaOccupied(amr.id)) {
+      amr.state = 'returning_home';
+      amr.currentPath = null;
+      amr.pathIndex = 0;
+      amr.targetHomeId = null;
+      return;
+    }
+
     const assignedPickups = this._getAssignedPickups();
     const path = pathfinder.findNearestPickupFromHome(amr.currentNodeId, assignedPickups);
     if (path) {
@@ -1096,6 +1119,11 @@ const simEngine = {
       amr.state = 'releasing';
       amr.waitTimer = 0;
     } else if (nextState === 'at_home') {
+      if (this._isWaitingAreaOccupied(amr.id)) {
+        amr.state = 'returning_home';
+        amr.targetHomeId = null;
+        return;
+      }
       amr.state = 'at_home';
       amr.assignedPickup = null;
       amr.targetHomeId = amr.currentNodeId;
