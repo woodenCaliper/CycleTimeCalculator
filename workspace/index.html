@@ -1540,6 +1540,16 @@ const itemStatusPanel = {
     const groupsEl = document.getElementById('item-status-groups');
     if (!groupsEl) return;
 
+    const paneEl = document.getElementById('item-status-pane');
+    const paneScrollTop = paneEl ? paneEl.scrollTop : 0;
+    const groupScrollMap = new Map();
+    groupsEl.querySelectorAll('.item-group').forEach(groupEl => {
+      const key = groupEl.dataset.group;
+      if (!key) return;
+      const bodyEl = groupEl.querySelector('.item-group-body');
+      groupScrollMap.set(key, bodyEl ? bodyEl.scrollTop : 0);
+    });
+
     const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
     const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
     const waitingAreas = [...state.nodes.values()].filter(n => n.type === 'home');
@@ -1553,6 +1563,14 @@ const itemStatusPanel = {
     ].join('');
 
     groupsEl.innerHTML = html;
+
+    if (paneEl) paneEl.scrollTop = paneScrollTop;
+    groupsEl.querySelectorAll('.item-group').forEach(groupEl => {
+      const key = groupEl.dataset.group;
+      if (!key || !groupScrollMap.has(key)) return;
+      const bodyEl = groupEl.querySelector('.item-group-body');
+      if (bodyEl) bodyEl.scrollTop = groupScrollMap.get(key);
+    });
   },
 
   _renderGroup(key, title, items, cardRenderer, emptyText) {
