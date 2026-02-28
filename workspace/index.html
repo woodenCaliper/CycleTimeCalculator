@@ -432,7 +432,7 @@ const simulationLogic = {
       moving_to_pickup: '→Pick',
       docking: 'Dock中',
       moving_to_dropoff: '→Drop',
-      releasing: 'Rel中',
+      releasing: 'Release中',
       returning_home: '帰還中'
     }[stateKey] || stateKey;
   }
@@ -1442,7 +1442,7 @@ const renderer = {
     switch (amr.state) {
       case 'at_home':      stateText = '待機'; break;
       case 'docking':      stateText = 'Dock'; break;
-      case 'releasing':    stateText = 'Rel'; break;
+      case 'releasing':    stateText = 'Release'; break;
       case 'returning_home': stateText = '帰還'; break;
     }
     if (stateText) {
