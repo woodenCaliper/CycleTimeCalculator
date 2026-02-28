@@ -205,7 +205,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <button class="tool-btn" data-tool="image" data-tooltip="画像読込"><span class="tool-icon">📷</span><span class="tool-label">画像読込</span></button>
       <button class="tool-btn" data-tool="pickup" data-tooltip="Pickup"><span class="tool-icon" style="color:#22c55e">■</span><span class="tool-label">Pickup Station</span></button>
       <button class="tool-btn" data-tool="dropoff" data-tooltip="DropOff"><span class="tool-icon" style="color:#ef4444">■</span><span class="tool-label">DropOff Station</span></button>
-      <button class="tool-btn" data-tool="home" data-tooltip="Home"><span class="tool-icon" style="color:#3b82f6">●</span><span class="tool-label">待機エリア</span></button>
+      <button class="tool-btn" data-tool="home" data-tooltip="Waiting Area"><span class="tool-icon" style="color:#3b82f6">●</span><span class="tool-label">Waiting Area</span></button>
       <button class="tool-btn" data-tool="waypoint" data-tooltip="Waypoint"><span class="tool-icon" style="color:#9ca3af">●</span><span class="tool-label">Waypoint</span></button>
       <button class="tool-btn" data-tool="loop-path" data-tooltip="経路作成"><span class="tool-icon" style="color:#4ade80">/</span><span class="tool-label">経路作成</span></button>
       <button class="tool-btn" data-tool="sync-area" data-tooltip="SyncArea作成"><span class="tool-icon" style="color:#facc15">⬠</span><span class="tool-label">SyncArea作成</span></button>
@@ -448,7 +448,7 @@ const graphManager = {
   _defaultLabel(type) {
     let count = 0;
     for (const n of state.nodes.values()) { if (n.type === type) count++; }
-    const names = { pickup: 'Pickup', dropoff: 'DropOff', home: 'Home', waypoint: 'WP' };
+    const names = { pickup: 'Pickup', dropoff: 'DropOff', home: 'Waiting Area', waypoint: 'WP' };
     return `${names[type]} ${String.fromCharCode(65 + count)}`;
   },
 
@@ -1930,7 +1930,7 @@ const uiController = {
     }
     const homes = [...state.nodes.values()].filter(n => n.type === 'home');
     if (homes.length === 0) {
-      showNotif('待機エリア（Home）を少なくとも1つ配置してください', 'error');
+      showNotif('Waiting Areaを少なくとも1つ配置してください', 'error');
       return false;
     }
     const hasHomeWithBranch = homes.some(h => (state.adjacency.get(h.id) || new Set()).size > 0);
