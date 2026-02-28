@@ -143,6 +143,11 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .item-card-group:last-child { margin-bottom: 0; }
 .item-card-group-label { font-size: 11px; color: #e94560; margin-bottom: 3px; }
 .item-card-line { font-size: 12px; color: #d8d8d8; line-height: 1.4; }
+.item-config-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.item-config-row:last-child { margin-bottom: 0; }
+.item-config-row label { font-size: 11px; color: #d8d8d8; }
+.item-config-row input { width: 90px; background: #0f3460; border: 1px solid #1a4a8a; color: #fff; padding: 2px 5px; border-radius: 3px; font-size: 12px; text-align: right; }
+.item-config-row .unit { font-size: 11px; color: #9ca3af; margin-left: 4px; }
 .item-card-empty { font-size: 12px; color: #9ca3af; padding: 4px 0; }
 .item-card.selected { border-color: #facc15; box-shadow: 0 0 0 1px rgba(250,204,21,0.45) inset; background: rgba(59,130,246,0.2); }
 
@@ -214,7 +219,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <div class="param-row"><label>速度</label><div><input type="number" id="param-speed" value="1.0" min="0.1" max="5" step="0.1"><span class="unit">m/s</span></div></div>
       <div class="param-row"><label>ドッキング</label><div><input type="number" id="param-docking" value="30" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>リリース</label><div><input type="number" id="param-release" value="20" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
-      <div class="param-row"><label>Pickup供給周期</label><div><input type="number" id="param-pickup-interval" value="120" min="1" max="600" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>スケール</label><div><input type="number" id="param-scale" value="0.1" min="0.001" max="10" step="0.001"><span class="unit">m/px</span></div></div>
     </div>
 
@@ -290,7 +294,6 @@ const state = {
     amrSpeed: 1.0,
     dockingTime: 30,
     releaseTime: 20,
-    pickupSupplyInterval: 120,
     simSpeed: 1,
     ffSpeed: 20
   },
@@ -304,6 +307,7 @@ const state = {
   totalDeliveries: 0,
   cycleRecords: [],
   pickupSupply: new Map(),
+  pickupSettings: new Map(),
   ui: {
     highlighted: { type: null, id: null }
   }
@@ -437,6 +441,7 @@ const graphManager = {
     const node = { id, type, x, y, label: label || this._defaultLabel(type) };
     state.nodes.set(id, node);
     state.adjacency.set(id, new Set());
+    if (type === 'pickup') getPickupSettings(id);
     return node;
   },
 
@@ -456,6 +461,7 @@ const graphManager = {
     state.adjacency.delete(id);
     for (const adj of state.adjacency.values()) adj.delete(id);
     state.nodes.delete(id);
+    state.pickupSettings.delete(id);
     this._rebuildLoopOrder();
   },
 
@@ -727,26 +733,27 @@ const collisionManager = {
 const simEngine = {
   _initPickupSupply() {
     state.pickupSupply.clear();
-    const interval = Math.max(1, state.config.pickupSupplyInterval || 120);
     const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
     for (const pickup of pickups) {
+      const settings = getPickupSettings(pickup.id);
       state.pickupSupply.set(pickup.id, {
-        availableCarts: 1,
-        nextSupplyTime: interval
+        availableCarts: settings.capacity,
+        nextSupplyTime: settings.supplyInterval
       });
     }
   },
 
   _refreshPickupSupply() {
-    const interval = Math.max(1, state.config.pickupSupplyInterval || 120);
     for (const [pickupId, supply] of state.pickupSupply) {
       if (!state.nodes.has(pickupId)) {
         state.pickupSupply.delete(pickupId);
         continue;
       }
+      const settings = getPickupSettings(pickupId);
+      if (supply.availableCarts > settings.capacity) supply.availableCarts = settings.capacity;
       while (state.simTime >= supply.nextSupplyTime) {
-        if (supply.availableCarts < 1) supply.availableCarts = 1;
-        supply.nextSupplyTime += interval;
+        if (supply.availableCarts < settings.capacity) supply.availableCarts++;
+        supply.nextSupplyTime += settings.supplyInterval;
       }
     }
   },
@@ -1459,6 +1466,17 @@ function escapeHtml(text) {
     .replaceAll("'", '&#39;');
 }
 
+function getPickupSettings(pickupId) {
+  let settings = state.pickupSettings.get(pickupId);
+  if (!settings) {
+    settings = { supplyInterval: 120, capacity: 1 };
+    state.pickupSettings.set(pickupId, settings);
+  }
+  settings.supplyInterval = Math.max(1, Number(settings.supplyInterval) || 120);
+  settings.capacity = Math.max(1, Number(settings.capacity) || 1);
+  return settings;
+}
+
 // ============================================================
 // UI - Right Item Status Panel
 // ============================================================
@@ -1483,6 +1501,24 @@ const itemStatusPanel = {
       const card = e.target.closest('.item-card[data-entity-type][data-entity-id]');
       if (!card) return;
       this.setHighlight(card.dataset.entityType, card.dataset.entityId);
+    });
+    groupsEl.addEventListener('change', e => {
+      const input = e.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      const key = input.dataset.configKey;
+      const pickupId = input.dataset.pickupId;
+      if (!key || !pickupId) return;
+      const settings = getPickupSettings(pickupId);
+      if (key === 'supplyInterval') {
+        settings.supplyInterval = Math.max(1, Number(input.value) || 120);
+        input.value = String(settings.supplyInterval);
+      } else if (key === 'capacity') {
+        settings.capacity = Math.max(1, Number(input.value) || 1);
+        input.value = String(settings.capacity);
+        const supply = state.pickupSupply.get(pickupId);
+        if (supply) supply.availableCarts = Math.min(supply.availableCarts, settings.capacity);
+      }
+      this.render();
     });
     this.render();
   },
@@ -1532,7 +1568,18 @@ const itemStatusPanel = {
 
   _renderPickupCard(node) {
     const waitingCarts = state.pickupSupply.get(node.id)?.availableCarts ?? 0;
-    return this._renderCard(node.label, `待機台車数：${waitingCarts}`, '（後で追加）', { entityType: 'node', entityId: node.id });
+    const settings = getPickupSettings(node.id);
+    const configHtml = `
+      <div class="item-config-row">
+        <label>台車供給周期[s]</label>
+        <div><input type="number" min="1" step="1" value="${settings.supplyInterval}" data-pickup-id="${escapeHtml(node.id)}" data-config-key="supplyInterval"><span class="unit">s</span></div>
+      </div>
+      <div class="item-config-row">
+        <label>設置可能台車台数</label>
+        <div><input type="number" min="1" step="1" value="${settings.capacity}" data-pickup-id="${escapeHtml(node.id)}" data-config-key="capacity"><span class="unit">台</span></div>
+      </div>
+    `;
+    return this._renderCard(node.label, `待機台車数：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
   },
 
   _renderDefaultNodeCard(node) {
@@ -1550,6 +1597,7 @@ const itemStatusPanel = {
     const selectedClass = isSelected ? ' selected' : '';
     const entityType = escapeHtml(meta.entityType || '');
     const entityId = escapeHtml(meta.entityId || '');
+    const configContent = meta.configIsHtml ? configLine : `<div class="item-card-line">${escapeHtml(configLine)}</div>`;
     return `
       <div class="item-card${selectedClass}" data-entity-type="${entityType}" data-entity-id="${entityId}">
         <div class="item-card-title">${escapeHtml(title)}</div>
@@ -1559,7 +1607,7 @@ const itemStatusPanel = {
         </div>
         <div class="item-card-group">
           <div class="item-card-group-label">設定</div>
-          <div class="item-card-line">${escapeHtml(configLine)}</div>
+          ${configContent}
         </div>
       </div>
     `;
@@ -1821,10 +1869,6 @@ const uiController = {
     document.getElementById('param-speed').addEventListener('change', e => { state.config.amrSpeed = parseFloat(e.target.value) || 1.0; });
     document.getElementById('param-docking').addEventListener('change', e => { state.config.dockingTime = parseFloat(e.target.value) || 30; });
     document.getElementById('param-release').addEventListener('change', e => { state.config.releaseTime = parseFloat(e.target.value) || 20; });
-    document.getElementById('param-pickup-interval').addEventListener('change', e => {
-      state.config.pickupSupplyInterval = Math.max(1, parseFloat(e.target.value) || 120);
-      e.target.value = state.config.pickupSupplyInterval;
-    });
     document.getElementById('param-scale').addEventListener('change', e => {
       state.config.scale = parseFloat(e.target.value) || 0.1;
       graphManager.recalcDistances();
