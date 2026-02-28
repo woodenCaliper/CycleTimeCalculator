@@ -429,10 +429,10 @@ const simulationLogic = {
   getAmrStateLabel(stateKey) {
     return {
       at_home: '待機',
-      moving_to_pickup: '→Pick',
+      moving_to_pickup: 'Pickup中',
       docking: 'Dock中',
       moving_to_dropoff: '→Drop',
-      releasing: 'Rel中',
+      releasing: 'Release中',
       returning_home: '帰還中'
     }[stateKey] || stateKey;
   }
@@ -1442,7 +1442,7 @@ const renderer = {
     switch (amr.state) {
       case 'at_home':      stateText = '待機'; break;
       case 'docking':      stateText = 'Dock'; break;
-      case 'releasing':    stateText = 'Rel'; break;
+      case 'releasing':    stateText = 'Release'; break;
       case 'returning_home': stateText = '帰還'; break;
     }
     if (stateText) {
@@ -1572,7 +1572,9 @@ const itemStatusPanel = {
     const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
     const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
     const waitingAreas = [...state.nodes.values()].filter(n => n.type === 'home');
-    const amrs = [...state.amrs];
+    const amrs = state.amrs.length > 0
+      ? [...state.amrs]
+      : waitingAreas.map((home, index) => simulationLogic.createInitialAmr(home, index));
 
     const html = [
       this._renderGroup('pickup', 'Pickup Station', pickups, node => this._renderPickupCard(node), 'Pickup Station は未配置です'),
@@ -2260,7 +2262,7 @@ const uiController = {
     }
     document.getElementById('stats-detail').innerHTML = detailHtml;
     document.getElementById('overlay-amr-stats').innerHTML = overlayHtml;
-    if (!state.running) itemStatusPanel.render();
+    itemStatusPanel.render();
   }
 };
 
