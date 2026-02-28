@@ -63,9 +63,93 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .stats-detail { margin-top: 6px; font-size: 11px; color: #888; max-height: 120px; overflow-y: auto; }
 .stats-detail .amr-stat { margin-bottom: 3px; padding: 2px 0; border-bottom: 1px solid #0f3460; }
 
-/* ===== Right Pane (Canvas) ===== */
+/* ===== Right Pane (Canvas + Details) ===== */
 #right-pane { flex: 1; position: relative; background: #111; overflow: hidden; }
 #canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+#item-status-pane {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 280px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  background: rgba(22, 33, 62, 0.94);
+  border: 1px solid #0f3460;
+  border-radius: 8px;
+  padding: 10px 12px;
+  z-index: 120;
+}
+
+#item-status-pane .pane-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #e94560;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 8px;
+}
+
+.item-group {
+  border: 1px solid #1a4a8a;
+  border-radius: 6px;
+  background: rgba(15, 52, 96, 0.35);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.item-group:last-child { margin-bottom: 0; }
+
+.item-group > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(15, 52, 96, 0.7);
+  border-bottom: 1px solid rgba(26, 74, 138, 0.8);
+}
+
+.item-group > summary::-webkit-details-marker { display: none; }
+
+.item-group > summary::after {
+  content: '▼';
+  float: right;
+  font-size: 10px;
+  color: #9ac7ff;
+}
+
+.item-group:not([open]) > summary::after { content: '▶'; }
+
+.item-group-body {
+  padding: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.item-card {
+  border: 1px solid #1a4a8a;
+  cursor: pointer;
+  border-radius: 6px;
+  background: rgba(15, 52, 96, 0.45);
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.item-card:last-child { margin-bottom: 0; }
+.item-card-title { font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 6px; }
+.item-card-group { margin-bottom: 6px; }
+.item-card-group:last-child { margin-bottom: 0; }
+.item-card-group-label { font-size: 11px; color: #e94560; margin-bottom: 3px; }
+.item-card-line { font-size: 12px; color: #d8d8d8; line-height: 1.4; }
+.item-config-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.item-config-row:last-child { margin-bottom: 0; }
+.item-config-row label { font-size: 11px; color: #d8d8d8; }
+.item-config-row input { width: 90px; background: #0f3460; border: 1px solid #1a4a8a; color: #fff; padding: 2px 5px; border-radius: 3px; font-size: 12px; text-align: right; }
+.item-config-row .unit { font-size: 11px; color: #9ca3af; margin-left: 4px; }
+.item-card-empty { font-size: 12px; color: #9ca3af; padding: 4px 0; }
+.item-card.selected { border-color: #facc15; box-shadow: 0 0 0 1px rgba(250,204,21,0.45) inset; background: rgba(59,130,246,0.2); }
 
 /* ===== Notification ===== */
 #notification { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(22,33,62,0.95); border: 1px solid #e94560; border-radius: 6px; padding: 6px 14px; font-size: 12px; color: #e94560; display: none; z-index: 150; pointer-events: none; max-width: 340px; text-align: center; }
@@ -135,7 +219,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <div class="param-row"><label>速度</label><div><input type="number" id="param-speed" value="1.0" min="0.1" max="5" step="0.1"><span class="unit">m/s</span></div></div>
       <div class="param-row"><label>ドッキング</label><div><input type="number" id="param-docking" value="30" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>リリース</label><div><input type="number" id="param-release" value="20" min="1" max="300" step="1"><span class="unit">秒</span></div></div>
-      <div class="param-row"><label>Pickup供給周期</label><div><input type="number" id="param-pickup-interval" value="120" min="1" max="600" step="1"><span class="unit">秒</span></div></div>
       <div class="param-row"><label>スケール</label><div><input type="number" id="param-scale" value="0.1" min="0.001" max="10" step="0.001"><span class="unit">m/px</span></div></div>
     </div>
 
@@ -168,6 +251,10 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
   <!-- Right Pane -->
   <div id="right-pane">
     <canvas id="canvas"></canvas>
+    <div id="item-status-pane">
+      <div class="pane-title">アイテム状態 / 設定</div>
+      <div id="item-status-groups"></div>
+    </div>
     <div id="notification"></div>
     <div id="overlay-stats" style="display:none;">
       <div class="os-title">AMR 詳細</div>
@@ -207,7 +294,6 @@ const state = {
     amrSpeed: 1.0,
     dockingTime: 30,
     releaseTime: 20,
-    pickupSupplyInterval: 120,
     simSpeed: 1,
     ffSpeed: 20
   },
@@ -220,7 +306,11 @@ const state = {
   paused: false,
   totalDeliveries: 0,
   cycleRecords: [],
-  pickupSupply: new Map()
+  pickupSupply: new Map(),
+  pickupSettings: new Map(),
+  ui: {
+    highlighted: { type: null, id: null }
+  }
 };
 
 // ============================================================
@@ -351,6 +441,7 @@ const graphManager = {
     const node = { id, type, x, y, label: label || this._defaultLabel(type) };
     state.nodes.set(id, node);
     state.adjacency.set(id, new Set());
+    if (type === 'pickup') getPickupSettings(id);
     return node;
   },
 
@@ -370,6 +461,7 @@ const graphManager = {
     state.adjacency.delete(id);
     for (const adj of state.adjacency.values()) adj.delete(id);
     state.nodes.delete(id);
+    state.pickupSettings.delete(id);
     this._rebuildLoopOrder();
   },
 
@@ -641,26 +733,27 @@ const collisionManager = {
 const simEngine = {
   _initPickupSupply() {
     state.pickupSupply.clear();
-    const interval = Math.max(1, state.config.pickupSupplyInterval || 120);
     const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
     for (const pickup of pickups) {
+      const settings = getPickupSettings(pickup.id);
       state.pickupSupply.set(pickup.id, {
-        availableCarts: 1,
-        nextSupplyTime: interval
+        availableCarts: settings.capacity,
+        nextSupplyTime: settings.supplyInterval
       });
     }
   },
 
   _refreshPickupSupply() {
-    const interval = Math.max(1, state.config.pickupSupplyInterval || 120);
     for (const [pickupId, supply] of state.pickupSupply) {
       if (!state.nodes.has(pickupId)) {
         state.pickupSupply.delete(pickupId);
         continue;
       }
+      const settings = getPickupSettings(pickupId);
+      if (supply.availableCarts > settings.capacity) supply.availableCarts = settings.capacity;
       while (state.simTime >= supply.nextSupplyTime) {
-        if (supply.availableCarts < 1) supply.availableCarts = 1;
-        supply.nextSupplyTime += interval;
+        if (supply.availableCarts < settings.capacity) supply.availableCarts++;
+        supply.nextSupplyTime += settings.supplyInterval;
       }
     }
   },
@@ -1274,6 +1367,18 @@ const renderer = {
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(n.label, n.x, n.y - 16);
     }
+
+    const highlighted = state.ui.highlighted;
+    if (highlighted.type === 'node' && highlighted.id === n.id) {
+      const radius = n.type === 'waypoint' ? 10 : 16;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     ctx.restore();
   },
 
@@ -1325,6 +1430,17 @@ const renderer = {
       ctx.fillStyle = '#4fc3f7'; ctx.font = '8px sans-serif';
       ctx.fillText(stateText, amr.x, amr.y + 18);
     }
+
+    const highlighted = state.ui.highlighted;
+    if (highlighted.type === 'amr' && highlighted.id === amr.id) {
+      ctx.beginPath();
+      ctx.arc(amr.x, amr.y, 14, 0, Math.PI * 2);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 };
 
@@ -1340,6 +1456,183 @@ function showNotif(msg, type = 'error') {
   clearTimeout(notifTimer);
   notifTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
 }
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function getPickupSettings(pickupId) {
+  let settings = state.pickupSettings.get(pickupId);
+  if (!settings) {
+    settings = { supplyInterval: 120, capacity: 1 };
+    state.pickupSettings.set(pickupId, settings);
+  }
+  settings.supplyInterval = Math.max(1, Number(settings.supplyInterval) || 120);
+  settings.capacity = Math.max(1, Number(settings.capacity) || 1);
+  return settings;
+}
+
+// ============================================================
+// UI - Right Item Status Panel
+// ============================================================
+const itemStatusPanel = {
+  groupOpen: {
+    pickup: true,
+    dropoff: true,
+    amr: true,
+    home: true
+  },
+
+  init() {
+    const groupsEl = document.getElementById('item-status-groups');
+    groupsEl.addEventListener('toggle', e => {
+      const details = e.target;
+      if (!(details instanceof HTMLDetailsElement)) return;
+      const key = details.dataset.group;
+      if (!key) return;
+      this.groupOpen[key] = details.open;
+    }, true);
+    groupsEl.addEventListener('click', e => {
+      if (e.target.closest('input, select, textarea, button')) return;
+      const card = e.target.closest('.item-card[data-entity-type][data-entity-id]');
+      if (!card) return;
+      this.setHighlight(card.dataset.entityType, card.dataset.entityId);
+    });
+    groupsEl.addEventListener('change', e => {
+      const input = e.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      const key = input.dataset.configKey;
+      const pickupId = input.dataset.pickupId;
+      if (!key || !pickupId) return;
+      const settings = getPickupSettings(pickupId);
+      if (key === 'supplyInterval') {
+        settings.supplyInterval = Math.max(1, Number(input.value) || 120);
+        input.value = String(settings.supplyInterval);
+      } else if (key === 'capacity') {
+        settings.capacity = Math.max(1, Number(input.value) || 1);
+        input.value = String(settings.capacity);
+        const supply = state.pickupSupply.get(pickupId);
+        if (supply) supply.availableCarts = Math.min(supply.availableCarts, settings.capacity);
+      }
+      this.render();
+    });
+    this.render();
+  },
+
+  setHighlight(type, id) {
+    const cur = state.ui.highlighted;
+    if (cur.type === type && cur.id === id) {
+      state.ui.highlighted = { type: null, id: null };
+    } else {
+      state.ui.highlighted = { type, id };
+    }
+    this.render();
+    renderer.render();
+  },
+
+
+  render() {
+    const groupsEl = document.getElementById('item-status-groups');
+    if (!groupsEl) return;
+
+    const paneEl = document.getElementById('item-status-pane');
+    const paneScrollTop = paneEl ? paneEl.scrollTop : 0;
+    const groupScrollMap = new Map();
+    groupsEl.querySelectorAll('.item-group').forEach(groupEl => {
+      const key = groupEl.dataset.group;
+      if (!key) return;
+      const bodyEl = groupEl.querySelector('.item-group-body');
+      groupScrollMap.set(key, bodyEl ? bodyEl.scrollTop : 0);
+    });
+
+    const pickups = [...state.nodes.values()].filter(n => n.type === 'pickup');
+    const dropoffs = [...state.nodes.values()].filter(n => n.type === 'dropoff');
+    const waitingAreas = [...state.nodes.values()].filter(n => n.type === 'home');
+    const amrs = [...state.amrs];
+
+    const html = [
+      this._renderGroup('pickup', 'Pickup Station', pickups, node => this._renderPickupCard(node), 'Pickup Station は未配置です'),
+      this._renderGroup('dropoff', 'Drop Off Station', dropoffs, node => this._renderDefaultNodeCard(node), 'Drop Off Station は未配置です'),
+      this._renderGroup('amr', 'AMR', amrs, amr => this._renderAmrCard(amr), 'AMR は未生成です'),
+      this._renderGroup('home', 'Waiting Area', waitingAreas, node => this._renderDefaultNodeCard(node), 'Waiting Area は未配置です')
+    ].join('');
+
+    groupsEl.innerHTML = html;
+
+    if (paneEl) paneEl.scrollTop = paneScrollTop;
+    groupsEl.querySelectorAll('.item-group').forEach(groupEl => {
+      const key = groupEl.dataset.group;
+      if (!key || !groupScrollMap.has(key)) return;
+      const bodyEl = groupEl.querySelector('.item-group-body');
+      if (bodyEl) bodyEl.scrollTop = groupScrollMap.get(key);
+    });
+  },
+
+  _renderGroup(key, title, items, cardRenderer, emptyText) {
+    const open = this.groupOpen[key] !== false;
+    const cards = items.length > 0
+      ? items.map((item, index) => cardRenderer(item, index)).join('')
+      : `<div class="item-card-empty">${escapeHtml(emptyText)}</div>`;
+    return `
+      <details class="item-group" data-group="${escapeHtml(key)}" ${open ? 'open' : ''}>
+        <summary>${escapeHtml(title)} (${items.length})</summary>
+        <div class="item-group-body">${cards}</div>
+      </details>
+    `;
+  },
+
+  _renderPickupCard(node) {
+    const waitingCarts = state.pickupSupply.get(node.id)?.availableCarts ?? 0;
+    const settings = getPickupSettings(node.id);
+    const configHtml = `
+      <div class="item-config-row">
+        <label>台車供給周期[s]</label>
+        <div><input type="number" min="1" step="1" value="${settings.supplyInterval}" data-pickup-id="${escapeHtml(node.id)}" data-config-key="supplyInterval"><span class="unit">s</span></div>
+      </div>
+      <div class="item-config-row">
+        <label>設置可能台車台数</label>
+        <div><input type="number" min="1" step="1" value="${settings.capacity}" data-pickup-id="${escapeHtml(node.id)}" data-config-key="capacity"><span class="unit">台</span></div>
+      </div>
+    `;
+    return this._renderCard(node.label, `待機台車数：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
+  },
+
+  _renderDefaultNodeCard(node) {
+    return this._renderCard(node.label, '（後で追加）', '（後で追加）', { entityType: 'node', entityId: node.id });
+  },
+
+  _renderAmrCard(amr) {
+    const stateLabel = simulationLogic.getAmrStateLabel(amr.state);
+    return this._renderCard(amr.label, `状態：${stateLabel}`, '（後で追加）', { entityType: 'amr', entityId: amr.id });
+  },
+
+  _renderCard(title, statusLine, configLine, meta = {}) {
+    const highlighted = state.ui.highlighted;
+    const isSelected = highlighted.type === meta.entityType && highlighted.id === meta.entityId;
+    const selectedClass = isSelected ? ' selected' : '';
+    const entityType = escapeHtml(meta.entityType || '');
+    const entityId = escapeHtml(meta.entityId || '');
+    const configContent = meta.configIsHtml ? configLine : `<div class="item-card-line">${escapeHtml(configLine)}</div>`;
+    return `
+      <div class="item-card${selectedClass}" data-entity-type="${entityType}" data-entity-id="${entityId}">
+        <div class="item-card-title">${escapeHtml(title)}</div>
+        <div class="item-card-group">
+          <div class="item-card-group-label">状態</div>
+          <div class="item-card-line">${escapeHtml(statusLine)}</div>
+        </div>
+        <div class="item-card-group">
+          <div class="item-card-group-label">設定</div>
+          ${configContent}
+        </div>
+      </div>
+    `;
+  }
+};
 
 // ============================================================
 // UI - Input Handler
@@ -1402,6 +1695,7 @@ const inputHandler = {
     } else if (['pickup', 'dropoff', 'home', 'waypoint'].includes(tool)) {
       graphManager.addNode(tool, pos.x, pos.y);
       renderer.render();
+      itemStatusPanel.render();
     } else if (tool === 'loop-path') {
       this._handleLoopPathClick(pos);
     } else if (tool === 'sync-area') {
@@ -1418,6 +1712,7 @@ const inputHandler = {
         }
       }
       renderer.render();
+      itemStatusPanel.render();
     } else if (tool === 'scale') {
       this.scalePoints.push(pos);
       if (this.scalePoints.length === 2) {
@@ -1538,6 +1833,7 @@ document.querySelector('#context-menu .cm-item[data-action="delete"]').addEventL
   else graphManager.removeSegment(menu._target.id);
   menu.style.display = 'none';
   renderer.render();
+  itemStatusPanel.render();
 });
 
 // Scale modal
@@ -1593,10 +1889,6 @@ const uiController = {
     document.getElementById('param-speed').addEventListener('change', e => { state.config.amrSpeed = parseFloat(e.target.value) || 1.0; });
     document.getElementById('param-docking').addEventListener('change', e => { state.config.dockingTime = parseFloat(e.target.value) || 30; });
     document.getElementById('param-release').addEventListener('change', e => { state.config.releaseTime = parseFloat(e.target.value) || 20; });
-    document.getElementById('param-pickup-interval').addEventListener('change', e => {
-      state.config.pickupSupplyInterval = Math.max(1, parseFloat(e.target.value) || 120);
-      e.target.value = state.config.pickupSupplyInterval;
-    });
     document.getElementById('param-scale').addEventListener('change', e => {
       state.config.scale = parseFloat(e.target.value) || 0.1;
       graphManager.recalcDistances();
@@ -1760,6 +2052,7 @@ const uiController = {
     }
     document.getElementById('stats-detail').innerHTML = detailHtml;
     document.getElementById('overlay-amr-stats').innerHTML = overlayHtml;
+    if (!state.running) itemStatusPanel.render();
   }
 };
 
@@ -1789,6 +2082,7 @@ function simLoop(timestamp) {
 // ============================================================
 renderer.resize();
 renderer.render();
+itemStatusPanel.init();
 inputHandler.init();
 uiController.init();
 
