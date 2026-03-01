@@ -1051,6 +1051,20 @@ const simEngine = {
 
   _handleReturningHome(amr, dt) {
     if (!amr.currentPath || amr.pathIndex >= amr.currentPath.length) {
+      // Homeへ戻れない待機中でも、Pickupが発生したら即タスク復帰する
+      const assignedPickups = this._getAssignedPickups();
+      const pickupPath = pathfinder.findNearestPickupOnLoop(amr.currentNodeId, assignedPickups);
+      if (pickupPath) {
+        amr.assignedPickup = pickupPath[pickupPath.length - 1];
+        amr.targetHomeId = null;
+        amr.state = 'moving_to_pickup';
+        amr.currentPath = pickupPath;
+        amr.pathIndex = 1;
+        if (pickupPath.length > 1) this._startSegment(amr);
+        else this._onPickupArrival(amr);
+        return;
+      }
+
       if (!this._tryStartReturnHome(amr)) {
         amr.totalWaitingTime += dt;
         return;
