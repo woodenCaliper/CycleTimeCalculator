@@ -344,18 +344,14 @@ function parseCounterFromId(id, prefix) {
 
 function getSyncAreaDisplayLabel(area, fallbackIndex = 0) {
   const rawLabel = typeof area?.label === 'string' ? area.label.trim() : '';
-  if (/^Sync Area\s*\d+$/i.test(rawLabel)) return rawLabel.replace(/\s+/g, ' ');
+  const labelMatch = rawLabel.match(/^S(?:ync\s*Area\s*)?(\d+)$/i);
+  if (labelMatch) return `S${parseInt(labelMatch[1], 10)}`;
 
   const rawId = typeof area?.id === 'string' ? area.id.trim() : '';
-  if (/^Sync Area\s*\d+$/i.test(rawId)) return rawId.replace(/\s+/g, ' ');
+  const idMatch = rawId.match(/^(?:sa|sync_area_)(\d+)$/i);
+  if (idMatch) return `S${parseInt(idMatch[1], 10)}`;
 
-  const saMatch = rawId.match(/^sa(\d+)$/i);
-  if (saMatch) return `Sync Area ${parseInt(saMatch[1], 10)}`;
-
-  const syncAreaMatch = rawId.match(/^sync_area_(\d+)$/i);
-  if (syncAreaMatch) return `Sync Area ${parseInt(syncAreaMatch[1], 10)}`;
-
-  return `Sync Area ${fallbackIndex + 1}`;
+  return `S${fallbackIndex + 1}`;
 }
 
 function parseSyncAreaCounter(area) {
@@ -1357,13 +1353,19 @@ const renderer = {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const cx = area.points.reduce((s, p) => s + p.x, 0) / area.points.length;
-      const cy = area.points.reduce((s, p) => s + p.y, 0) / area.points.length;
+      const anchorPoint = area.points.reduce((best, p) => {
+        if (p.y < best.y) return p;
+        if (p.y > best.y) return best;
+        return p.x < best.x ? p : best;
+      }, area.points[0]);
+      ctx.save();
       ctx.fillStyle = '#fde68a';
       ctx.font = 'bold 10px sans-serif';
-      ctx.textAlign = 'center';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
       const areaLabel = getSyncAreaDisplayLabel(area, 0);
-      ctx.fillText(`${areaLabel} (${areaStyle.label})`, cx, cy);
+      ctx.fillText(areaLabel, anchorPoint.x - 18, anchorPoint.y - 16);
+      ctx.restore();
     }
 
     for (const seg of state.segments.values()) {
@@ -2074,7 +2076,7 @@ const inputHandler = {
       state.syncAreaCounter += 1;
       state.syncAreas.push({
         id: 'sync_area_' + state.syncAreaCounter,
-        label: `Sync Area ${state.syncAreaCounter}`,
+        label: `S${state.syncAreaCounter}`,
         points: [...this.syncAreaPoints],
         occupantAmrId: null
       });
