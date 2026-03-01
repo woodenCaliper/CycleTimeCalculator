@@ -148,6 +148,10 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .item-config-row label { font-size: 11px; color: #d8d8d8; }
 .item-config-row input { width: 90px; background: #0f3460; border: 1px solid #1a4a8a; color: #fff; padding: 2px 5px; border-radius: 3px; font-size: 12px; text-align: right; }
 .item-config-row .unit { font-size: 11px; color: #9ca3af; margin-left: 4px; }
+.item-dropoff-targets { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.item-dropoff-target { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #d8d8d8; }
+.item-dropoff-target input[type="checkbox"] { width: auto; margin: 0; accent-color: #22c55e; }
+.item-dropoff-empty { font-size: 11px; color: #9ca3af; margin-top: 2px; }
 .item-card-empty { font-size: 12px; color: #9ca3af; padding: 4px 0; }
 .item-card.selected { border-color: #facc15; box-shadow: 0 0 0 1px rgba(250,204,21,0.45) inset; background: rgba(59,130,246,0.2); }
 
@@ -474,7 +478,13 @@ const graphManager = {
     state.nodes.set(id, node);
     state.adjacency.set(id, new Set());
     if (type === 'pickup') getPickupSettings(id);
-    if (type === 'dropoff') getDropoffSettings(id);
+    if (type === 'dropoff') {
+      getDropoffSettings(id);
+      for (const [pickupId, settings] of state.pickupSettings.entries()) {
+        if (!state.nodes.has(pickupId) || !Array.isArray(settings.targetDropoffIds)) continue;
+        if (!settings.targetDropoffIds.includes(id)) settings.targetDropoffIds.push(id);
+      }
+    }
     return node;
   },
 
@@ -500,6 +510,10 @@ const graphManager = {
     state.pickupSupply.delete(id);
     state.dropoffSettings.delete(id);
     state.dropoffBuffer.delete(id);
+    for (const settings of state.pickupSettings.values()) {
+      if (!Array.isArray(settings.targetDropoffIds)) continue;
+      settings.targetDropoffIds = settings.targetDropoffIds.filter(dropoffId => dropoffId !== id);
+    }
     this._rebuildLoopOrder();
   },
 
@@ -721,13 +735,30 @@ const pathfinder = {
     return bestPath;
   },
 
-  // ループ部でのDropOff探索（最近傍）
-  findNearestDropoffOnLoop(startId) {
+  // ループ部でのDropOff探索（Pickupごとの搬送先制約 + 最短候補を均等選択）
+  findNearestDropoffOnLoop(startId, pickupId) {
+    const allowedDropoffIds = new Set(getAllowedDropoffIdsForPickup(pickupId));
     const targets = [...state.nodes.values()]
-      .filter(n => n.type === 'dropoff' && simEngine._canAcceptDropoffCart(n.id))
+      .filter(n => n.type === 'dropoff' && allowedDropoffIds.has(n.id) && simEngine._canAcceptDropoffCart(n.id))
       .map(n => n.id);
     if (!targets.length) return null;
-    return this.findLoopPath(startId, targets);
+
+    const shortestByDistance = new Map();
+    let bestDistance = Infinity;
+    for (const targetId of targets) {
+      const path = this.findLoopPath(startId, [targetId]);
+      if (!path) continue;
+      const distance = this._pathDistance(path);
+      if (!Number.isFinite(distance)) continue;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        shortestByDistance.clear();
+      }
+      if (distance === bestDistance) shortestByDistance.set(targetId, path);
+    }
+    if (shortestByDistance.size === 0) return null;
+    const candidatePaths = [...shortestByDistance.values()];
+    return candidatePaths[Math.floor(Math.random() * candidatePaths.length)] ?? null;
   },
 
   // Homeからのタスク探索
@@ -1009,7 +1040,7 @@ const simEngine = {
     if (amr.waitTimer >= state.config.dockingTime) {
       amr.hasCargo = true;
       amr.waitTimer = 0;
-      const path = pathfinder.findNearestDropoffOnLoop(amr.currentNodeId);
+      const path = pathfinder.findNearestDropoffOnLoop(amr.currentNodeId, amr.currentNodeId);
       if (path && path.length > 0) {
         amr.assignedDropoff = path[path.length - 1];
         amr.state = 'moving_to_dropoff';
@@ -1592,12 +1623,35 @@ function escapeHtml(text) {
 function getPickupSettings(pickupId) {
   let settings = state.pickupSettings.get(pickupId);
   if (!settings) {
-    settings = { supplyInterval: 120, capacity: 1 };
+    settings = { supplyInterval: 120, capacity: 1, targetDropoffIds: null };
     state.pickupSettings.set(pickupId, settings);
   }
   settings.supplyInterval = Math.max(1, Number(settings.supplyInterval) || 120);
   settings.capacity = Math.max(1, Number(settings.capacity) || 1);
+  if (!Array.isArray(settings.targetDropoffIds)) {
+    settings.targetDropoffIds = null;
+  } else {
+    const validDropoffIds = new Set(
+      [...state.nodes.values()]
+        .filter(node => node.type === 'dropoff')
+        .map(node => node.id)
+    );
+    settings.targetDropoffIds = [...new Set(settings.targetDropoffIds)]
+      .filter(dropoffId => validDropoffIds.has(dropoffId));
+  }
   return settings;
+}
+
+function getAllowedDropoffIdsForPickup(pickupId) {
+  const allDropoffIds = [...state.nodes.values()]
+    .filter(node => node.type === 'dropoff')
+    .map(node => node.id);
+  const settings = getPickupSettings(pickupId);
+  if (!Array.isArray(settings.targetDropoffIds) || settings.targetDropoffIds.length === 0) {
+    return allDropoffIds;
+  }
+  const allowed = settings.targetDropoffIds.filter(dropoffId => allDropoffIds.includes(dropoffId));
+  return allowed.length > 0 ? allowed : allDropoffIds;
 }
 
 function getDropoffSettings(dropoffId) {
@@ -1668,6 +1722,16 @@ const itemStatusPanel = {
           input.value = String(settings.capacity);
           const supply = state.pickupSupply.get(pickupId);
           if (supply) supply.availableCarts = Math.min(supply.availableCarts, settings.capacity);
+        } else if (key === 'targetDropoff') {
+          const targetDropoffId = input.dataset.targetDropoffId;
+          if (!targetDropoffId) return;
+          if (!Array.isArray(settings.targetDropoffIds)) {
+            settings.targetDropoffIds = getAllowedDropoffIdsForPickup(pickupId);
+          }
+          const set = new Set(settings.targetDropoffIds);
+          if (input.checked) set.add(targetDropoffId);
+          else set.delete(targetDropoffId);
+          settings.targetDropoffIds = [...set];
         }
       } else if (dropoffId) {
         const settings = getDropoffSettings(dropoffId);
@@ -1760,6 +1824,16 @@ const itemStatusPanel = {
   _renderPickupCard(node, index) {
     const waitingCarts = state.pickupSupply.get(node.id)?.availableCarts ?? 0;
     const settings = getPickupSettings(node.id);
+    const allDropoffs = [...state.nodes.values()].filter(candidate => candidate.type === 'dropoff');
+    const allowedDropoffIds = new Set(getAllowedDropoffIdsForPickup(node.id));
+    const dropoffTargetsHtml = allDropoffs.length > 0
+      ? `<div class="item-dropoff-targets">${allDropoffs.map((dropoff, dropoffIndex) => `
+          <label class="item-dropoff-target">
+            <input type="checkbox" data-pickup-id="${escapeHtml(node.id)}" data-config-key="targetDropoff" data-target-dropoff-id="${escapeHtml(dropoff.id)}" ${allowedDropoffIds.has(dropoff.id) ? 'checked' : ''}>
+            <span>${escapeHtml(this._getNodePanelLabel(dropoff, dropoffIndex))}</span>
+          </label>
+        `).join('')}</div>`
+      : '<div class="item-dropoff-empty">Drop Off Station を追加してください</div>';
     const configHtml = `
       <div class="item-config-row">
         <label>台車供給周期[s]</label>
@@ -1768,6 +1842,10 @@ const itemStatusPanel = {
       <div class="item-config-row">
         <label>設置可能台車台数</label>
         <div><input type="number" min="1" step="1" value="${settings.capacity}" data-pickup-id="${escapeHtml(node.id)}" data-config-key="capacity"><span class="unit">台</span></div>
+      </div>
+      <div class="item-config-row" style="align-items:flex-start;">
+        <label>搬送先Drop Off</label>
+        <div>${dropoffTargetsHtml}</div>
       </div>
     `;
     return this._renderCard(this._getNodePanelLabel(node, index), `待機台車数：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
@@ -2109,7 +2187,8 @@ const persistenceManager = {
       pickupSettings: [...state.pickupSettings.entries()].map(([id, settings]) => ({
         id,
         supplyInterval: settings.supplyInterval,
-        capacity: settings.capacity
+        capacity: settings.capacity,
+        targetDropoffIds: Array.isArray(settings.targetDropoffIds) ? [...settings.targetDropoffIds] : null
       })),
       dropoffSettings: [...state.dropoffSettings.entries()].map(([id, settings]) => ({
         id,
@@ -2189,13 +2268,14 @@ const persistenceManager = {
       if (!entry || typeof entry.id !== 'string' || !state.nodes.has(entry.id)) continue;
       state.pickupSettings.set(entry.id, {
         supplyInterval: Math.max(1, Number(entry.supplyInterval) || 30),
-        capacity: Math.max(1, Number(entry.capacity) || 1)
+        capacity: Math.max(1, Number(entry.capacity) || 1),
+        targetDropoffIds: Array.isArray(entry.targetDropoffIds) ? [...entry.targetDropoffIds] : null
       });
     }
 
     for (const node of state.nodes.values()) {
       if (node.type === 'pickup' && !state.pickupSettings.has(node.id)) {
-        state.pickupSettings.set(node.id, { supplyInterval: 30, capacity: 1 });
+        state.pickupSettings.set(node.id, { supplyInterval: 30, capacity: 1, targetDropoffIds: null });
       }
       if (node.type === 'dropoff' && !state.dropoffSettings.has(node.id)) {
         state.dropoffSettings.set(node.id, { capacity: 1, removalInterval: 120 });
