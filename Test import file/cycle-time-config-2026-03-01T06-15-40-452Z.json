@@ -1,0 +1,270 @@
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-03-01T06:15:40.446Z",
+  "config": {
+    "scale": 0.1,
+    "amrSpeed": 1,
+    "dockingTime": 30,
+    "releaseTime": 20,
+    "simSpeed": 1,
+    "ffSpeed": 20
+  },
+  "counters": {
+    "nodeCounter": 10,
+    "segCounter": 9,
+    "syncAreaCounter": 4
+  },
+  "backgroundImageDataUrl": null,
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "pickup",
+      "x": 230,
+      "y": 297,
+      "label": "Pickup 1"
+    },
+    {
+      "id": "n2",
+      "type": "pickup",
+      "x": 235,
+      "y": 395,
+      "label": "Pickup 2"
+    },
+    {
+      "id": "n3",
+      "type": "dropoff",
+      "x": 646,
+      "y": 251,
+      "label": "DropOff 1"
+    },
+    {
+      "id": "n4",
+      "type": "dropoff",
+      "x": 664,
+      "y": 395,
+      "label": "DropOff 2"
+    },
+    {
+      "id": "n5",
+      "type": "home",
+      "x": 289,
+      "y": 189,
+      "label": "Waiting Area 1"
+    },
+    {
+      "id": "n6",
+      "type": "home",
+      "x": 393,
+      "y": 174,
+      "label": "Waiting Area 2"
+    },
+    {
+      "id": "n7",
+      "type": "home",
+      "x": 496,
+      "y": 437,
+      "label": "Waiting Area 3"
+    },
+    {
+      "id": "n9",
+      "type": "waypoint",
+      "x": 366,
+      "y": 343,
+      "label": "WP A"
+    },
+    {
+      "id": "n10",
+      "type": "waypoint",
+      "x": 515,
+      "y": 332,
+      "label": "WP B"
+    }
+  ],
+  "segments": [
+    {
+      "id": "s1",
+      "from": "n1",
+      "to": "n9",
+      "distance": 14.356879883874491
+    },
+    {
+      "id": "s2",
+      "from": "n9",
+      "to": "n10",
+      "distance": 14.940548852033515
+    },
+    {
+      "id": "s3",
+      "from": "n10",
+      "to": "n3",
+      "distance": 15.40194792875239
+    },
+    {
+      "id": "s4",
+      "from": "n2",
+      "to": "n9",
+      "distance": 14.094325099131211
+    },
+    {
+      "id": "s5",
+      "from": "n9",
+      "to": "n6",
+      "distance": 17.114321488157223
+    },
+    {
+      "id": "s6",
+      "from": "n5",
+      "to": "n9",
+      "distance": 17.217723426748382
+    },
+    {
+      "id": "s7",
+      "from": "n7",
+      "to": "n10",
+      "distance": 10.67052013727541
+    },
+    {
+      "id": "s9",
+      "from": "n10",
+      "to": "n4",
+      "distance": 16.17714437099453
+    }
+  ],
+  "loopSegments": [
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6",
+    "s7",
+    "s9"
+  ],
+  "loopOrder": [
+    "n1",
+    "n9",
+    "n10",
+    "n3"
+  ],
+  "syncAreas": [
+    {
+      "id": "sa1",
+      "label": "Sync Area 1",
+      "points": [
+        {
+          "x": 167,
+          "y": 263
+        },
+        {
+          "x": 184,
+          "y": 334
+        },
+        {
+          "x": 262,
+          "y": 330
+        },
+        {
+          "x": 264,
+          "y": 275
+        }
+      ]
+    },
+    {
+      "id": "sa2",
+      "label": "Sync Area 2",
+      "points": [
+        {
+          "x": 332,
+          "y": 323
+        },
+        {
+          "x": 340,
+          "y": 370
+        },
+        {
+          "x": 390,
+          "y": 361
+        },
+        {
+          "x": 392,
+          "y": 314
+        }
+      ]
+    },
+    {
+      "id": "sa3",
+      "label": "Sync Area 3",
+      "points": [
+        {
+          "x": 483,
+          "y": 316
+        },
+        {
+          "x": 486,
+          "y": 352
+        },
+        {
+          "x": 551,
+          "y": 363
+        },
+        {
+          "x": 545,
+          "y": 306
+        }
+      ]
+    },
+    {
+      "id": "sa4",
+      "label": "Sync Area 4",
+      "points": [
+        {
+          "x": 641,
+          "y": 363
+        },
+        {
+          "x": 622,
+          "y": 402
+        },
+        {
+          "x": 680,
+          "y": 433
+        },
+        {
+          "x": 701,
+          "y": 383
+        }
+      ]
+    }
+  ],
+  "pickupSettings": [
+    {
+      "id": "n1",
+      "supplyInterval": 120,
+      "capacity": 2,
+      "targetDropoffIds": [
+        "n3"
+      ]
+    },
+    {
+      "id": "n2",
+      "supplyInterval": 120,
+      "capacity": 2,
+      "targetDropoffIds": [
+        "n4",
+        "n3"
+      ]
+    }
+  ],
+  "dropoffSettings": [
+    {
+      "id": "n3",
+      "capacity": 2,
+      "removalInterval": 60
+    },
+    {
+      "id": "n4",
+      "capacity": 2,
+      "removalInterval": 60
+    }
+  ]
+}
