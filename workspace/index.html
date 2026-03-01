@@ -344,18 +344,14 @@ function parseCounterFromId(id, prefix) {
 
 function getSyncAreaDisplayLabel(area, fallbackIndex = 0) {
   const rawLabel = typeof area?.label === 'string' ? area.label.trim() : '';
-  if (/^Sync Area\s*\d+$/i.test(rawLabel)) return rawLabel.replace(/\s+/g, ' ');
+  const labelMatch = rawLabel.match(/^S(?:ync\s*Area\s*)?(\d+)$/i);
+  if (labelMatch) return `S${parseInt(labelMatch[1], 10)}`;
 
   const rawId = typeof area?.id === 'string' ? area.id.trim() : '';
-  if (/^Sync Area\s*\d+$/i.test(rawId)) return rawId.replace(/\s+/g, ' ');
+  const idMatch = rawId.match(/^(?:sa|sync_area_)(\d+)$/i);
+  if (idMatch) return `S${parseInt(idMatch[1], 10)}`;
 
-  const saMatch = rawId.match(/^sa(\d+)$/i);
-  if (saMatch) return `Sync Area ${parseInt(saMatch[1], 10)}`;
-
-  const syncAreaMatch = rawId.match(/^sync_area_(\d+)$/i);
-  if (syncAreaMatch) return `Sync Area ${parseInt(syncAreaMatch[1], 10)}`;
-
-  return `Sync Area ${fallbackIndex + 1}`;
+  return `S${fallbackIndex + 1}`;
 }
 
 function parseSyncAreaCounter(area) {
@@ -1363,7 +1359,7 @@ const renderer = {
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
       const areaLabel = getSyncAreaDisplayLabel(area, 0);
-      ctx.fillText(`${areaLabel} (${areaStyle.label})`, cx, cy);
+      ctx.fillText(areaLabel, cx, cy);
     }
 
     for (const seg of state.segments.values()) {
@@ -2074,7 +2070,7 @@ const inputHandler = {
       state.syncAreaCounter += 1;
       state.syncAreas.push({
         id: 'sync_area_' + state.syncAreaCounter,
-        label: `Sync Area ${state.syncAreaCounter}`,
+        label: `S${state.syncAreaCounter}`,
         points: [...this.syncAreaPoints],
         occupantAmrId: null
       });
