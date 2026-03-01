@@ -33,6 +33,42 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 #left-pane.collapsed .pane-section { padding: 4px 4px; }
 .section-title { font-size: 11px; font-weight: 700; color: #e94560; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; }
 
+.collapsible-section {
+  padding-top: 0;
+}
+
+.collapsible-section details {
+  margin-top: 8px;
+}
+
+.collapsible-section summary.section-title {
+  list-style: none;
+  cursor: pointer;
+  margin-bottom: 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(15, 52, 96, 0.45);
+}
+
+.collapsible-section summary.section-title::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-section summary.section-title::after {
+  content: '▼';
+  float: right;
+  font-size: 10px;
+  color: #9ac7ff;
+}
+
+.collapsible-section details:not([open]) summary.section-title::after {
+  content: '▶';
+}
+
+.collapsible-content {
+  margin-top: 6px;
+}
+
 /* ===== Tool Buttons ===== */
 .tool-btn { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: none; background: none; color: #c0c0c0; cursor: pointer; width: 100%; text-align: left; border-radius: 4px; font-size: 13px; white-space: nowrap; }
 .tool-btn:hover { background: rgba(233,69,96,0.15); color: #fff; }
@@ -195,11 +231,21 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
   <div id="left-pane">
     <button id="toggle-pane" title="パネルを折りたたむ">&laquo;</button>
 
+    <!-- Initial Setup Section -->
+    <div class="pane-section collapsible-section">
+      <details open>
+        <summary class="section-title">初期設定</summary>
+        <div class="collapsible-content">
+          <button class="tool-btn" data-tool="image" data-tooltip="画像読込"><span class="tool-icon">📷</span><span class="tool-label">画像読み込み</span></button>
+          <button class="tool-btn" data-tool="scale" data-tooltip="スケール設定"><span class="tool-icon">📏</span><span class="tool-label">スケール設定</span></button>
+        </div>
+      </details>
+    </div>
+
     <!-- Tools Section -->
     <div class="pane-section">
       <div class="section-title">ツール</div>
       <button class="tool-btn active" data-tool="select" data-tooltip="選択/移動"><span class="tool-icon">✋</span><span class="tool-label">選択 / 移動</span></button>
-      <button class="tool-btn" data-tool="image" data-tooltip="画像読込"><span class="tool-icon">📷</span><span class="tool-label">画像読込</span></button>
       <button class="tool-btn" data-tool="pickup" data-tooltip="Pickup"><span class="tool-icon" style="color:#22c55e">■</span><span class="tool-label">Pickup Station</span></button>
       <button class="tool-btn" data-tool="dropoff" data-tooltip="DropOff"><span class="tool-icon" style="color:#ef4444">■</span><span class="tool-label">DropOff Station</span></button>
       <button class="tool-btn" data-tool="home" data-tooltip="Waiting Area"><span class="tool-icon" style="color:#3b82f6">●</span><span class="tool-label">Waiting Area</span></button>
@@ -207,7 +253,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <button class="tool-btn" data-tool="loop-path" data-tooltip="経路作成"><span class="tool-icon" style="color:#4ade80">/</span><span class="tool-label">経路作成</span></button>
       <button class="tool-btn" data-tool="sync-area" data-tooltip="SyncArea作成"><span class="tool-icon" style="color:#facc15">⬠</span><span class="tool-label">SyncArea作成</span></button>
       <button class="tool-btn" data-tool="delete" data-tooltip="削除"><span class="tool-icon">🗑</span><span class="tool-label">削除</span></button>
-      <button class="tool-btn" data-tool="scale" data-tooltip="スケール設定"><span class="tool-icon">📏</span><span class="tool-label">スケール設定</span></button>
     </div>
 
     <!-- Parameters Section -->
