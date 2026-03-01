@@ -1350,6 +1350,9 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
 const renderer = {
+  logicalWidth: 0,
+  logicalHeight: 0,
+
   _getNodeIndexByType(node) {
     let index = 0;
     for (const current of state.nodes.values()) {
@@ -1372,19 +1375,32 @@ const renderer = {
 
   resize() {
     const rect = document.getElementById('right-pane').getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    const dpr = window.devicePixelRatio || 1;
+    const logicalWidth = Math.round(rect.width);
+    const logicalHeight = Math.round(rect.height);
+
+    this.logicalWidth = logicalWidth;
+    this.logicalHeight = logicalHeight;
+
+    canvas.style.width = `${logicalWidth}px`;
+    canvas.style.height = `${logicalHeight}px`;
+    canvas.width = Math.round(logicalWidth * dpr);
+    canvas.height = Math.round(logicalHeight * dpr);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
   },
 
   render() {
-    const w = canvas.width, h = canvas.height;
+    const w = this.logicalWidth || Math.round(canvas.getBoundingClientRect().width);
+    const h = this.logicalHeight || Math.round(canvas.getBoundingClientRect().height);
     ctx.clearRect(0, 0, w, h);
 
     // 背景
     if (state.bgImage) {
       const img = state.bgImage;
-      const sc = Math.min(w / img.width, h / img.height);
-      const iw = img.width * sc, ih = img.height * sc;
+      const iw = img.width, ih = img.height;
       ctx.drawImage(img, (w - iw) / 2, (h - ih) / 2, iw, ih);
     } else {
       ctx.fillStyle = '#1a1a2e';
