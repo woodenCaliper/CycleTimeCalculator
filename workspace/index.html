@@ -735,7 +735,7 @@ const pathfinder = {
     return bestPath;
   },
 
-  // ループ部でのDropOff探索（Pickupごとの搬送先制約 + 最短候補を均等選択）
+  // ループ部でのDropOff探索（Pickupごとの搬送先制約 + 候補を均等確率で選択）
   findNearestDropoffOnLoop(startId, pickupId) {
     const allowedDropoffIds = new Set(getAllowedDropoffIdsForPickup(pickupId));
     const targets = [...state.nodes.values()]
@@ -743,21 +743,15 @@ const pathfinder = {
       .map(n => n.id);
     if (!targets.length) return null;
 
-    const shortestByDistance = new Map();
-    let bestDistance = Infinity;
+    const candidatePaths = [];
     for (const targetId of targets) {
       const path = this.findLoopPath(startId, [targetId]);
-      if (!path) continue;
+      if (!path || path.length === 0) continue;
       const distance = this._pathDistance(path);
       if (!Number.isFinite(distance)) continue;
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        shortestByDistance.clear();
-      }
-      if (distance === bestDistance) shortestByDistance.set(targetId, path);
+      candidatePaths.push(path);
     }
-    if (shortestByDistance.size === 0) return null;
-    const candidatePaths = [...shortestByDistance.values()];
+    if (candidatePaths.length === 0) return null;
     return candidatePaths[Math.floor(Math.random() * candidatePaths.length)] ?? null;
   },
 
