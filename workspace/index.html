@@ -1857,7 +1857,7 @@ const itemStatusPanel = {
       this._renderGroup('pickup', 'Pickup Station', pickups, (node, index) => this._renderPickupCard(node, index), 'Pickup Station は未配置です'),
       this._renderGroup('dropoff', 'Drop Off Station', dropoffs, (node, index) => this._renderDropoffCard(node, index), 'Drop Off Station は未配置です'),
       this._renderGroup('amr', 'AMR', amrs, amr => this._renderAmrCard(amr), 'AMR は未生成です'),
-      this._renderGroup('home', 'Waiting Area', waitingAreas, (node, index) => this._renderDefaultNodeCard(node, index), 'Waiting Area は未配置です'),
+      this._renderGroup('home', 'Waiting Area', waitingAreas, (node, index) => this._renderHomeCard(node, index), 'Waiting Area は未配置です'),
       this._renderGroup('syncArea', 'Sync Area', syncAreas, area => this._renderSyncAreaCard(area), 'Sync Area は未配置です')
     ].join('');
 
@@ -1929,6 +1929,14 @@ const itemStatusPanel = {
       </div>
     `;
     return this._renderCard(this._getNodePanelLabel(node, index), `待機台車：${waitingCarts}`, configHtml, { entityType: 'node', entityId: node.id, configIsHtml: true });
+  },
+
+  _renderHomeCard(node, index) {
+    const waitingAmrLabels = state.amrs
+      .filter(amr => amr.state === 'at_home' && amr.currentNodeId === node.id)
+      .map(amr => amr.label);
+    const waitingAmrText = waitingAmrLabels.length > 0 ? waitingAmrLabels.join(', ') : 'なし';
+    return this._renderCard(this._getNodePanelLabel(node, index), `待機AMR：${waitingAmrText}`, '（後で追加）', { entityType: 'node', entityId: node.id });
   },
 
   _renderDefaultNodeCard(node, index) {
