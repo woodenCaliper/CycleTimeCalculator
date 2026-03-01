@@ -975,10 +975,10 @@ const simEngine = {
   },
 
   _isWaitingAreaOccupied(excludeAmrId = null) {
-    return state.amrs.some(amr => {
-      if (excludeAmrId && amr.id === excludeAmrId) return false;
-      return amr.state === 'at_home' || !!amr.targetHomeId;
-    });
+    const totalHomes = [...state.nodes.values()].filter(node => node.type === 'home').length;
+    if (totalHomes === 0) return true;
+    const reservedHomes = this._getReservedHomes(excludeAmrId);
+    return reservedHomes.size >= totalHomes;
   },
 
   _tryStartReturnHome(amr) {
