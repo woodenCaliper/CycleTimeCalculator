@@ -1352,6 +1352,31 @@ const ctx = canvas.getContext('2d');
 const renderer = {
   logicalWidth: 0,
   logicalHeight: 0,
+  view: {
+    zoom: 1,
+    offsetX: 0,
+    offsetY: 0,
+    minZoom: 0.2,
+    maxZoom: 5
+  },
+
+  screenToWorld(x, y) {
+    return {
+      x: (x - this.view.offsetX) / this.view.zoom,
+      y: (y - this.view.offsetY) / this.view.zoom
+    };
+  },
+
+  zoomAt(screenX, screenY, zoomFactor) {
+    const prevZoom = this.view.zoom;
+    const nextZoom = Math.min(this.view.maxZoom, Math.max(this.view.minZoom, prevZoom * zoomFactor));
+    if (Math.abs(nextZoom - prevZoom) < 1e-6) return;
+
+    const worldPos = this.screenToWorld(screenX, screenY);
+    this.view.zoom = nextZoom;
+    this.view.offsetX = screenX - worldPos.x * nextZoom;
+    this.view.offsetY = screenY - worldPos.y * nextZoom;
+  },
 
   _getNodeIndexByType(node) {
     let index = 0;
@@ -1396,6 +1421,9 @@ const renderer = {
     const w = this.logicalWidth || Math.round(canvas.getBoundingClientRect().width);
     const h = this.logicalHeight || Math.round(canvas.getBoundingClientRect().height);
     ctx.clearRect(0, 0, w, h);
+    ctx.save();
+    ctx.translate(this.view.offsetX, this.view.offsetY);
+    ctx.scale(this.view.zoom, this.view.zoom);
 
     // 背景
     if (state.bgImage) {
@@ -1545,6 +1573,7 @@ const renderer = {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    ctx.restore();
   },
 
 
@@ -2021,13 +2050,23 @@ const inputHandler = {
   syncAreaPoints: [],        // SyncArea作成中の頂点列
   scalePoints: [],
   draggingNode: null,
+  isPanning: false,
+  panStartX: 0,
+  panStartY: 0,
+  panStartOffsetX: 0,
+  panStartOffsetY: 0,
   mouseX: null,
   mouseY: null,
 
   init() {
     canvas.addEventListener('mousedown', e => this._onMouseDown(e));
     canvas.addEventListener('mousemove', e => this._onMouseMove(e));
-    canvas.addEventListener('mouseup', () => { this.draggingNode = null; });
+    canvas.addEventListener('wheel', e => this._onMouseWheel(e), { passive: false });
+    window.addEventListener('mouseup', () => {
+      this.draggingNode = null;
+      this.isPanning = false;
+      canvas.style.cursor = 'crosshair';
+    });
     canvas.addEventListener('contextmenu', e => this._onContextMenu(e));
     document.addEventListener('click', e => {
       if (!e.target.closest('#context-menu')) {
@@ -2039,9 +2078,14 @@ const inputHandler = {
     });
   },
 
-  _getPos(e) {
+  _getCanvasPos(e) {
     const rect = canvas.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  },
+
+  _getWorldPos(e) {
+    const canvasPos = this._getCanvasPos(e);
+    return renderer.screenToWorld(canvasPos.x, canvasPos.y);
   },
 
   _onEscape() {
@@ -2062,8 +2106,20 @@ const inputHandler = {
   },
 
   _onMouseDown(e) {
+    if (e.button === 2) {
+      const canvasPos = this._getCanvasPos(e);
+      this.isPanning = true;
+      this.panStartX = canvasPos.x;
+      this.panStartY = canvasPos.y;
+      this.panStartOffsetX = renderer.view.offsetX;
+      this.panStartOffsetY = renderer.view.offsetY;
+      this.draggingNode = null;
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
+
     if (e.button !== 0) return;
-    const pos = this._getPos(e);
+    const pos = this._getWorldPos(e);
     const tool = this.currentTool;
 
     if (tool === 'select') {
@@ -2176,9 +2232,16 @@ const inputHandler = {
   },
 
   _onMouseMove(e) {
-    const pos = this._getPos(e);
+    const canvasPos = this._getCanvasPos(e);
+    const pos = renderer.screenToWorld(canvasPos.x, canvasPos.y);
     this.mouseX = pos.x;
     this.mouseY = pos.y;
+    if (this.isPanning) {
+      renderer.view.offsetX = this.panStartOffsetX + (canvasPos.x - this.panStartX);
+      renderer.view.offsetY = this.panStartOffsetY + (canvasPos.y - this.panStartY);
+      renderer.render();
+      return;
+    }
     if (this.draggingNode) {
       this.draggingNode.x = pos.x;
       this.draggingNode.y = pos.y;
@@ -2187,9 +2250,24 @@ const inputHandler = {
     renderer.render();
   },
 
-  _onContextMenu(e) {
+  _onMouseWheel(e) {
     e.preventDefault();
-    const pos = this._getPos(e);
+    const canvasPos = this._getCanvasPos(e);
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    renderer.zoomAt(canvasPos.x, canvasPos.y, zoomFactor);
+    renderer.render();
+  },
+
+  _onContextMenu(e) {
+    if (this.isPanning) {
+      e.preventDefault();
+      this.isPanning = false;
+      canvas.style.cursor = 'crosshair';
+      return;
+    }
+
+    e.preventDefault();
+    const pos = this._getWorldPos(e);
     const node = graphManager.findNearNode(pos.x, pos.y);
     const seg = !node ? graphManager.findNearSegment(pos.x, pos.y) : null;
     if (node || seg) {
