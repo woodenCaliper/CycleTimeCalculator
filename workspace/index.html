@@ -231,6 +231,17 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
   <div id="left-pane">
     <button id="toggle-pane" title="パネルを折りたたむ">&laquo;</button>
 
+    <!-- Import / Export Section -->
+    <div class="pane-section collapsible-section">
+      <details open>
+        <summary class="section-title">Import / Export</summary>
+        <div class="collapsible-content sim-controls">
+          <button class="sim-btn" id="btn-export-config" data-tooltip="設定をJSONで保存"><span class="tool-icon">💾</span><span class="btn-label">Export</span></button>
+          <button class="sim-btn" id="btn-import-config" data-tooltip="JSON設定を読み込み"><span class="tool-icon">📂</span><span class="btn-label">Import</span></button>
+        </div>
+      </details>
+    </div>
+
     <!-- Initial Setup Section -->
     <div class="pane-section collapsible-section">
       <details open>
@@ -271,8 +282,6 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
         <button class="sim-btn" id="btn-play-pause" data-tooltip="再生/一時停止"><span class="tool-icon">▶</span><span class="btn-label">再生</span></button>
         <button class="sim-btn" id="btn-fast-forward" data-tooltip="早送り"><span class="tool-icon">⏩</span><span class="btn-label">x20</span></button>
         <button class="sim-btn" id="btn-reset" data-tooltip="リセット"><span class="tool-icon">⏹</span><span class="btn-label">Reset</span></button>
-        <button class="sim-btn" id="btn-export-config" data-tooltip="設定をJSONで保存"><span class="tool-icon">💾</span><span class="btn-label">Export</span></button>
-        <button class="sim-btn" id="btn-import-config" data-tooltip="JSON設定を読み込み"><span class="tool-icon">📂</span><span class="btn-label">Import</span></button>
       </div>
       <div class="speed-input-group">
         <label>倍速:</label>
