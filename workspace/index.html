@@ -1353,15 +1353,18 @@ const renderer = {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const minX = area.points.reduce((min, p) => Math.min(min, p.x), area.points[0].x);
-      const minY = area.points.reduce((min, p) => Math.min(min, p.y), area.points[0].y);
+      const anchorPoint = area.points.reduce((best, p) => {
+        if (p.y < best.y) return p;
+        if (p.y > best.y) return best;
+        return p.x < best.x ? p : best;
+      }, area.points[0]);
       ctx.save();
       ctx.fillStyle = '#fde68a';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       const areaLabel = getSyncAreaDisplayLabel(area, 0);
-      ctx.fillText(areaLabel, minX - 16, minY - 14);
+      ctx.fillText(areaLabel, anchorPoint.x - 18, anchorPoint.y - 16);
       ctx.restore();
     }
 
