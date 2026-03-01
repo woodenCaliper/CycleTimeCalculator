@@ -48,20 +48,23 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
   padding: 6px 8px;
   border-radius: 4px;
   background: rgba(15, 52, 96, 0.45);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .collapsible-section summary.section-title::-webkit-details-marker {
   display: none;
 }
 
-.collapsible-section summary.section-title::after {
+.collapsible-section summary.section-title::before {
   content: '▼';
-  float: right;
   font-size: 10px;
   color: #9ac7ff;
+  flex-shrink: 0;
 }
 
-.collapsible-section details:not([open]) summary.section-title::after {
+.collapsible-section details:not([open]) summary.section-title::before {
   content: '▶';
 }
 
@@ -145,18 +148,21 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
   color: #fff;
   background: rgba(15, 52, 96, 0.7);
   border-bottom: 1px solid rgba(26, 74, 138, 0.8);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .item-group > summary::-webkit-details-marker { display: none; }
 
-.item-group > summary::after {
+.item-group > summary::before {
   content: '▼';
-  float: right;
   font-size: 10px;
   color: #9ac7ff;
+  flex-shrink: 0;
 }
 
-.item-group:not([open]) > summary::after { content: '▶'; }
+.item-group:not([open]) > summary::before { content: '▶'; }
 
 .item-group-body {
   padding: 8px;
